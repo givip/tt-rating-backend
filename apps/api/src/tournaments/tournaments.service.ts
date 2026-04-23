@@ -1,11 +1,15 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { CloudRunService } from '../rating/cloud-run.service';
+import {
+  RATING_JOB_TRIGGER,
+  type RatingJobTrigger,
+} from '../rating/rating-job-trigger.interface';
 import { MATCH_WEIGHTS } from '@tt-rating/core';
 
 /**
@@ -22,7 +26,7 @@ export interface Actor {
 export class TournamentsService {
   constructor(
     private prisma: PrismaService,
-    private cloudRun: CloudRunService,
+    @Inject(RATING_JOB_TRIGGER) private ratingJob: RatingJobTrigger,
   ) {}
 
   validateParticipantCount(count: number): void {
@@ -140,7 +144,7 @@ export class TournamentsService {
       data: { status: 'completed' },
     });
 
-    await this.cloudRun.triggerRatingJob(tournamentId);
+    await this.ratingJob.trigger(tournamentId);
 
     return { message: 'Tournament finalized — rating calculation queued' };
   }

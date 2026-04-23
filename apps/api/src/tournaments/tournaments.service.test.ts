@@ -24,14 +24,14 @@ const mockPrisma = {
   player: { findUnique: vi.fn() },
 };
 
-const mockCloudRun = { triggerRatingJob: vi.fn() };
+const mockRatingJob = { trigger: vi.fn() };
 
 describe('TournamentsService', () => {
   let service: TournamentsService;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    service = new TournamentsService(mockPrisma as any, mockCloudRun as any);
+    service = new TournamentsService(mockPrisma as any, mockRatingJob as any);
   });
 
   describe('validateParticipantCount', () => {
@@ -201,16 +201,16 @@ describe('TournamentsService', () => {
       await expect(service.finalize('t1', otherOrganizerActor)).rejects.toThrow(
         ForbiddenException,
       );
-      expect(mockCloudRun.triggerRatingJob).not.toHaveBeenCalled();
+      expect(mockRatingJob.trigger).not.toHaveBeenCalled();
     });
 
     it('admin can finalize any tournament', async () => {
       mockPrisma.tournament.findUnique.mockResolvedValue(base);
       mockPrisma.tournament.update.mockResolvedValue({});
-      mockCloudRun.triggerRatingJob.mockResolvedValue(undefined);
+      mockRatingJob.trigger.mockResolvedValue(undefined);
 
       await service.finalize('t1', adminActor);
-      expect(mockCloudRun.triggerRatingJob).toHaveBeenCalledWith('t1');
+      expect(mockRatingJob.trigger).toHaveBeenCalledWith('t1');
     });
 
     it('returns early if already processed', async () => {
@@ -219,7 +219,7 @@ describe('TournamentsService', () => {
       });
       const result = await service.finalize('t1', organizerActor);
       expect(result.message).toMatch(/already/i);
-      expect(mockCloudRun.triggerRatingJob).not.toHaveBeenCalled();
+      expect(mockRatingJob.trigger).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException if fewer than 4 participants', async () => {
@@ -234,7 +234,7 @@ describe('TournamentsService', () => {
     it('sets status to completed and triggers rating job', async () => {
       mockPrisma.tournament.findUnique.mockResolvedValue(base);
       mockPrisma.tournament.update.mockResolvedValue({});
-      mockCloudRun.triggerRatingJob.mockResolvedValue(undefined);
+      mockRatingJob.trigger.mockResolvedValue(undefined);
 
       const result = await service.finalize('t1', organizerActor);
 
@@ -242,7 +242,7 @@ describe('TournamentsService', () => {
         where: { id: 't1' },
         data: { status: 'completed' },
       });
-      expect(mockCloudRun.triggerRatingJob).toHaveBeenCalledWith('t1');
+      expect(mockRatingJob.trigger).toHaveBeenCalledWith('t1');
       expect(result.message).toBeTruthy();
     });
   });

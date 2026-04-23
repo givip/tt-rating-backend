@@ -8,7 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { TournamentsController } from './tournaments.controller';
 import { TournamentsService } from './tournaments.service';
 import { PrismaService } from '../common/prisma.service';
-import { CloudRunService } from '../rating/cloud-run.service';
+import { RATING_JOB_TRIGGER } from '../rating/rating-job-trigger.interface';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { TOKEN_CONFIG_SERVICE, TokenService } from '../auth/token.service';
@@ -25,7 +25,10 @@ Reflect.defineMetadata(
 );
 Reflect.defineMetadata(
   'design:paramtypes',
-  [PrismaService, CloudRunService],
+  // Second constructor param is `@Inject(RATING_JOB_TRIGGER)` — Nest reads
+  // that explicit token first, so the design-type slot just needs *some*
+  // constructor function. `Object` satisfies that.
+  [PrismaService, Object],
   TournamentsService,
 );
 Reflect.defineMetadata(
@@ -58,7 +61,7 @@ const mockPrisma = {
   refreshToken: { create: vi.fn(), updateMany: vi.fn() },
 };
 
-const mockCloudRun = { triggerRatingJob: vi.fn() };
+const mockRatingJob = { trigger: vi.fn() };
 
 const envConfig = {
   get: <T = string>(key: string): T | undefined => {
@@ -89,7 +92,7 @@ describe('Tournaments E2E (Phase 2 smoke)', () => {
         RolesGuard,
         TokenService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CloudRunService, useValue: mockCloudRun },
+        { provide: RATING_JOB_TRIGGER, useValue: mockRatingJob },
         { provide: TOKEN_CONFIG_SERVICE, useValue: envConfig },
       ],
     }).compile();
@@ -118,7 +121,7 @@ describe('Tournaments E2E (Phase 2 smoke)', () => {
       mockPrisma.tournamentParticipant.create,
       mockPrisma.tournamentParticipant.findMany,
       mockPrisma.player.findUnique,
-      mockCloudRun.triggerRatingJob,
+      mockRatingJob.trigger,
     ]) {
       fn.mockReset();
     }

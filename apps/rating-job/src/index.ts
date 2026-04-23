@@ -31,13 +31,20 @@ export function buildGlickoInputs(
     });
 }
 
-async function main() {
-  const prisma = new PrismaClient();
-  const tournamentId = process.env.TOURNAMENT_ID;
-  if (!tournamentId) {
-    throw new Error('TOURNAMENT_ID environment variable is required');
-  }
-
+/**
+ * Recompute ratings for a single tournament. Exported so it can be driven
+ * either by the standalone CLI entry-point at the bottom of this file (when
+ * the job runs as its own process — Cloud Run, cron, etc.) or by the API's
+ * `InProcessRatingJobTrigger`, which calls this directly with its own Prisma
+ * client.
+ *
+ * Idempotent by design: exits early if `tournament.processed` is already
+ * true, so re-triggers are safe.
+ */
+export async function processTournament(
+  tournamentId: string,
+  prisma: PrismaClient,
+): Promise<void> {
   console.log(`Starting rating job for tournament: ${tournamentId}`);
 
   const tournament = await prisma.tournament.findUnique({
@@ -149,7 +156,23 @@ async function main() {
   await prisma.$executeRaw`REFRESH MATERIALIZED VIEW CONCURRENTLY leaderboard`;
 
   console.log(`Rating job complete for tournament: ${tournamentId}`);
-  await prisma.$disconnect();
+}
+
+async function main() {
+  const tournamentId = process.env.TOURNAMENT_ID;
+  if (!tournamentId) {
+    throw new Error('TOURNAMENT_ID environment variable is required');
+  }
+
+  // The CLI entry-point owns its own Prisma client; `processTournament`
+  // leaves lifecycle to the caller so in-process triggers can share the
+  // API's already-connected client without flipping it into disconnect.
+  const prisma = new PrismaClient();
+  try {
+    await processTournament(tournamentId, prisma);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 if (!process.env.VITEST) {
