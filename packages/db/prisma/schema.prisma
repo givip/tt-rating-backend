@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Gender {
+  M
+  F
+}
+
+enum RatingSource {
+  imported_rttf
+  imported_georgia_league
+  imported_rttf_verified
+  native_ttfge
+  estimated
+  manual
+}
+
+enum RatingConfidence {
+  low
+  medium
+  high
+}
+
+enum UserRole {
+  player
+  organizer
+  referee
+  club_owner
+  admin
+}
+
+enum TournamentFormat {
+  round_robin
+  single_elim
+  groups_playoff
+  swiss
+}
+
+enum MatchFormat {
+  bo3
+  bo5
+  bo7
+}
+
+enum TournamentCategory {
+  open
+  under12
+  under14
+  under16
+  under18
+  women
+  veterans40
+}
+
+enum TournamentStatus {
+  draft
+  open
+  in_progress
+  completed
+  cancelled
+}
+
+enum MatchStatus {
+  scheduled
+  in_progress
+  completed
+  disputed
+}
+
+enum RatingChangeType {
+  tournament
+  manual
+  initial_import
+}
+
+model User {
+  id           String   @id @default(uuid())
+  phone        String?  @unique
+  email        String?  @unique
+  passwordHash String?  @map("password_hash")
+  role         UserRole @default(player)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  player              Player?
+  organizedTournaments Tournament[] @relation("OrganizedTournaments")
+  rttfVerifications   Player[]     @relation("RttfVerifiedBy")
+  enteredMatches      Match[]      @relation("EnteredMatches")
+  ratingManualChanges RatingChange[] @relation("ManualRatingChanges")
+  configUpdates       RatingConfig[] @relation("ConfigUpdates")
+  refreshTokens       RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  replacedBy String?   @map("replaced_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model AuthOtp {
+  id        String    @id @default(uuid())
+  phone     String
+  otpHash   String    @map("otp_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, createdAt])
+  @@map("auth_otps")
+}
+
+model LoginAttempt {
+  id         String   @id @default(uuid())
+  identifier String
+  ip         String?
+  success    Boolean
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([identifier, createdAt])
+  @@map("login_attempts")
+}
+
+model Player {
+  id              String           @id @default(uuid())
+  userId          String           @unique @map("user_id")
+  firstNameKa     String           @map("first_name_ka")
+  lastNameKa      String           @map("last_name_ka")
+  firstNameEn     String           @map("first_name_en")
+  lastNameEn      String           @map("last_name_en")
+  birthDate       DateTime?        @map("birth_date")
+  gender          Gender
+  city            String?
+  clubId          String?          @map("club_id")
+  photoUrl        String?          @map("photo_url")
+  internalRating  Float            @default(1500) @map("internal_rating")
+  rd              Float            @default(350)
+  ratingSource    RatingSource     @default(native_ttfge) @map("rating_source")
+  ratingConfidence RatingConfidence @default(low) @map("rating_confidence")
+  provisional     Boolean          @default(true)
+  tournamentsPlayed Int            @default(0) @map("tournaments_played")
+  rttfId          String?          @unique @map("rttf_id")
+  rttfVerifiedAt  DateTime?        @map("rttf_verified_at")
+  rttfVerifiedBy  String?          @map("rttf_verified_by")
+  sourceRating    Float?           @map("source_rating")
+  sourceUrl       String?          @map("source_url")
+  importDate      DateTime?        @map("import_date")
+  registeredAt    DateTime         @default(now()) @map("registered_at")
+  isActive        Boolean          @default(true) @map("is_active")
+
+  user            User             @relation(fields: [userId], references: [id])
+  club            Club?            @relation(fields: [clubId], references: [id])
+  rttfVerifier    User?            @relation("RttfVerifiedBy", fields: [rttfVerifiedBy], references: [id])
+  tournamentParticipations TournamentParticipant[]
+  ratingChanges   RatingChange[]
+  ratingSnapshots RatingSnapshot[]
+
+  @@index([internalRating])
+  @@index([firstNameEn, lastNameEn])
+  @@index([firstNameKa, lastNameKa])
+  @@map("players")
+}
+
+model Club {
+  id        String   @id @default(uuid())
+  nameKa    String   @map("name_ka")
+  nameEn    String   @map("name_en")
+  city      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  players     Player[]
+  tournaments Tournament[]
+
+  @@map("clubs")
+}
+
+model Tournament {
+  id                   String             @id @default(uuid())
+  title                String
+  organizerId          String             @map("organizer_id")
+  clubId               String?            @map("club_id")
+  venueName            String?            @map("venue_name")
+  address              String?
+  city                 String
+  startsAt             DateTime           @map("starts_at")
+  endsAt               DateTime?          @map("ends_at")
+  format               TournamentFormat
+  matchFormat          MatchFormat        @default(bo5)
+  hasThirdPlaceMatch   Boolean            @default(false) @map("has_third_place_match")
+  category             TournamentCategory @default(open)
+  minRating            Float?             @map("min_rating")
+  maxRating            Float?             @map("max_rating")
+  maxParticipants      Int?               @map("max_participants")
+  onlineRegistration   Boolean            @default(false) @map("online_registration")
+  registrationDeadline DateTime?          @map("registration_deadline")
+  status               TournamentStatus   @default(draft)
+  participantsCount    Int                @default(0) @map("participants_count")
+  processed            Boolean            @default(false)
+  createdAt            DateTime           @default(now()) @map("created_at")
+
+  organizer    User         @relation("OrganizedTournaments", fields: [organizerId], references: [id])
+  club         Club?        @relation(fields: [clubId], references: [id])
+  participants TournamentParticipant[]
+  matches      Match[]
+  ratingChanges RatingChange[]
+
+  @@index([status])
+  @@index([startsAt])
+  @@map("tournaments")
+}
+
+model TournamentParticipant {
+  tournamentId       String  @map("tournament_id")
+  playerId           String  @map("player_id")
+  seed               Int?
+  finalPosition      Int?    @map("final_position")
+  ratingBefore       Float   @map("rating_before")
+  rdBefore           Float   @map("rd_before")
+  ratingAfter        Float?  @map("rating_after")
+  rdAfter            Float?  @map("rd_after")
+  ratingDeltaDisplay Int?    @map("rating_delta_display")
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  player     Player     @relation(fields: [playerId], references: [id])
+
+  @@id([tournamentId, playerId])
+  @@map("tournament_participants")
+}
+
+model Match {
+  id           String      @id @default(uuid())
+  tournamentId String      @map("tournament_id")
+  round        Int
+  player1Id    String      @map("player1_id")
+  player2Id    String      @map("player2_id")
+  winnerId     String?     @map("winner_id")
+  setsPlayer1  Int?        @map("sets_player1")
+  setsPlayer2  Int?        @map("sets_player2")
+  scoreDetails Json?       @map("score_details")
+  matchWeight  Float       @default(1.0) @map("match_weight")
+  playedAt     DateTime?   @map("played_at")
+  enteredBy    String?     @map("entered_by")
+  status       MatchStatus @default(scheduled)
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  enteredByUser User?   @relation("EnteredMatches", fields: [enteredBy], references: [id])
+
+  @@index([tournamentId])
+  @@index([player1Id])
+  @@index([player2Id])
+  @@map("matches")
+}
+
+model RatingChange {
+  id                  String           @id @default(uuid())
+  playerId            String           @map("player_id")
+  tournamentId        String?          @map("tournament_id")
+  ratingBefore        Float            @map("rating_before")
+  ratingAfter         Float            @map("rating_after")
+  rdBefore            Float            @map("rd_before")
+  rdAfter             Float            @map("rd_after")
+  changeType          RatingChangeType @map("change_type")
+  formulaVersion      String           @map("formula_version")
+  coefficientsSnapshot Json            @map("coefficients_snapshot")
+  reason              String?
+  changedBy           String?          @map("changed_by")
+  createdAt           DateTime         @default(now()) @map("created_at")
+
+  player     Player      @relation(fields: [playerId], references: [id])
+  tournament Tournament? @relation(fields: [tournamentId], references: [id])
+  changedByUser User?    @relation("ManualRatingChanges", fields: [changedBy], references: [id])
+
+  @@index([playerId, createdAt])
+  @@map("rating_changes")
+}
+
+model RatingSnapshot {
+  playerId      String   @map("player_id")
+  snapshotDate  DateTime @map("snapshot_date") @db.Date
+  rating        Float
+  rd            Float
+  rankOverall   Int?     @map("rank_overall")
+  rankCategory  Int?     @map("rank_category")
+
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@id([playerId, snapshotDate])
+  @@index([snapshotDate])
+  @@map("rating_snapshots")
+}
+
+model RatingConfig {
+  key       String   @id
+  value     Json
+  validFrom DateTime? @map("valid_from")
+  validTo   DateTime? @map("valid_to")
+  updatedBy String?  @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  updatedByUser User? @relation("ConfigUpdates", fields: [updatedBy], references: [id])
+
+  @@map("rating_config")
+}

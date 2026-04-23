@@ -1,0 +1,32 @@
+{
+  "name": "@tt-rating/types",
+  "version": "0.1.0",
+  "description": "Shared Zod schemas and TypeScript types for tt-rating API",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": ["table-tennis", "rating", "zod", "typescript"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tt-rating/core"
+  },
+  "peerDependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "zod": "^3.24.0"
+  }
+}
