@@ -1,19 +1,40 @@
-import { Module } from '@nestjs/common';
+import { DynamicModule, Global, Module, Type } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { InProcessRatingJobTrigger } from './in-process.trigger';
-import { RATING_JOB_TRIGGER } from './rating-job-trigger.interface';
+import {
+  RATING_JOB_TRIGGER,
+  type RatingJobTrigger,
+} from './rating-job-trigger.interface';
 
 /**
- * Provides the `RATING_JOB_TRIGGER` token with the in-process default.
- * Platform repos (e.g. ttr.ge) override this by re-binding the token to
- * their own adapter (Cloud Run, pub/sub, etc.) from a higher-priority
- * module.
+ * Dynamic module so platform repos can swap the `RATING_JOB_TRIGGER`
+ * binding without patching backend. Marked `@Global()` so a single
+ * `forRoot()` at `AppModule` level is visible to every feature module.
+ *
+ *   // Backend default (in-process worker):
+ *   RatingModule.forRoot({ trigger: InProcessRatingJobTrigger })
+ *
+ *   // ttr.ge (Cloud Run):
+ *   RatingModule.forRoot({ trigger: CloudRunRatingJobTrigger })
  */
-@Module({
-  providers: [
-    PrismaService,
-    { provide: RATING_JOB_TRIGGER, useClass: InProcessRatingJobTrigger },
-  ],
-  exports: [RATING_JOB_TRIGGER],
-})
-export class RatingModule {}
+@Global()
+@Module({})
+export class RatingModule {
+  static forRoot(options: {
+    trigger: Type<RatingJobTrigger>;
+  }): DynamicModule {
+    return {
+      module: RatingModule,
+      providers: [
+        PrismaService,
+        { provide: RATING_JOB_TRIGGER, useClass: options.trigger },
+      ],
+      exports: [RATING_JOB_TRIGGER, PrismaService],
+    };
+  }
+
+  /** Convenience for dev/tests: default in-process binding. */
+  static forRootDefault(): DynamicModule {
+    return RatingModule.forRoot({ trigger: InProcessRatingJobTrigger });
+  }
+}
