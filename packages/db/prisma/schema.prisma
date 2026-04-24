@@ -267,7 +267,7 @@ model Match {
   status       MatchStatus @default(scheduled)
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
-  tournament    Tournament? @relation(fields: [tournamentId], references: [id])
+  tournament    Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Restrict)
   enteredByUser User?       @relation("EnteredMatches", fields: [enteredBy], references: [id])
 
   @@index([tournamentId])
