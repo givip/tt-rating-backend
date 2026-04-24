@@ -13,15 +13,6 @@ enum Gender {
   F
 }
 
-enum RatingSource {
-  imported_rttf
-  imported_georgia_league
-  imported_rttf_verified
-  native_ttfge
-  estimated
-  manual
-}
-
 enum RatingConfidence {
   low
   medium
@@ -81,20 +72,23 @@ enum RatingChangeType {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  phone        String?  @unique
-  email        String?  @unique
-  passwordHash String?  @map("password_hash")
-  role         UserRole @default(player)
-  createdAt    DateTime @default(now()) @map("created_at")
+  id              String    @id @default(uuid())
+  phone           String?   @unique
+  email           String?   @unique
+  passwordHash    String?   @map("password_hash")
+  phoneVerifiedAt DateTime? @map("phone_verified_at")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  role            UserRole  @default(player)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  player              Player?
-  organizedTournaments Tournament[] @relation("OrganizedTournaments")
-  rttfVerifications   Player[]     @relation("RttfVerifiedBy")
-  enteredMatches      Match[]      @relation("EnteredMatches")
-  ratingManualChanges RatingChange[] @relation("ManualRatingChanges")
-  configUpdates       RatingConfig[] @relation("ConfigUpdates")
-  refreshTokens       RefreshToken[]
+  player               Player?
+  organizedTournaments Tournament[]   @relation("OrganizedTournaments")
+  rttfVerifications    Player[]       @relation("RttfVerifiedBy")
+  enteredMatches       Match[]        @relation("EnteredMatches")
+  ratingManualChanges  RatingChange[] @relation("ManualRatingChanges")
+  configUpdates        RatingConfig[] @relation("ConfigUpdates")
+  refreshTokens        RefreshToken[]
 
   @@map("users")
 }
@@ -138,38 +132,35 @@ model LoginAttempt {
 }
 
 model Player {
-  id              String           @id @default(uuid())
-  userId          String           @unique @map("user_id")
-  firstNameKa     String           @map("first_name_ka")
-  lastNameKa      String           @map("last_name_ka")
-  firstNameEn     String           @map("first_name_en")
-  lastNameEn      String           @map("last_name_en")
-  birthDate       DateTime?        @map("birth_date")
-  gender          Gender
-  city            String?
-  clubId          String?          @map("club_id")
-  photoUrl        String?          @map("photo_url")
-  internalRating  Float            @default(1500) @map("internal_rating")
-  rd              Float            @default(350)
-  ratingSource    RatingSource     @default(native_ttfge) @map("rating_source")
-  ratingConfidence RatingConfidence @default(low) @map("rating_confidence")
-  provisional     Boolean          @default(true)
-  tournamentsPlayed Int            @default(0) @map("tournaments_played")
-  rttfId          String?          @unique @map("rttf_id")
-  rttfVerifiedAt  DateTime?        @map("rttf_verified_at")
-  rttfVerifiedBy  String?          @map("rttf_verified_by")
-  sourceRating    Float?           @map("source_rating")
-  sourceUrl       String?          @map("source_url")
-  importDate      DateTime?        @map("import_date")
-  registeredAt    DateTime         @default(now()) @map("registered_at")
-  isActive        Boolean          @default(true) @map("is_active")
+  id                String           @id @default(uuid())
+  userId            String           @unique @map("user_id")
+  firstNameKa       String           @map("first_name_ka")
+  lastNameKa        String           @map("last_name_ka")
+  firstNameEn       String           @map("first_name_en")
+  lastNameEn        String           @map("last_name_en")
+  birthDate         DateTime?        @map("birth_date")
+  gender            Gender
+  city              String?
+  clubId            String?          @map("club_id")
+  photoUrl          String?          @map("photo_url")
+  internalRating    Float            @default(1500) @map("internal_rating")
+  rd                Float            @default(350)
+  ratingConfidence  RatingConfidence @default(low) @map("rating_confidence")
+  provisional       Boolean          @default(true)
+  tournamentsPlayed Int              @default(0) @map("tournaments_played")
+  rttfId            String?          @unique @map("rttf_id")
+  rttfVerifiedAt    DateTime?        @map("rttf_verified_at")
+  rttfVerifiedBy    String?          @map("rttf_verified_by")
+  registeredAt      DateTime         @default(now()) @map("registered_at")
+  isActive          Boolean          @default(true) @map("is_active")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
 
-  user            User             @relation(fields: [userId], references: [id])
-  club            Club?            @relation(fields: [clubId], references: [id])
-  rttfVerifier    User?            @relation("RttfVerifiedBy", fields: [rttfVerifiedBy], references: [id])
+  user                     User                    @relation(fields: [userId], references: [id])
+  club                     Club?                   @relation(fields: [clubId], references: [id])
+  rttfVerifier             User?                   @relation("RttfVerifiedBy", fields: [rttfVerifiedBy], references: [id])
   tournamentParticipations TournamentParticipant[]
-  ratingChanges   RatingChange[]
-  ratingSnapshots RatingSnapshot[]
+  ratingChanges            RatingChange[]
+  ratingSnapshots          RatingSnapshot[]
 
   @@index([internalRating])
   @@index([firstNameEn, lastNameEn])
@@ -182,7 +173,10 @@ model Club {
   nameKa    String   @map("name_ka")
   nameEn    String   @map("name_en")
   city      String
+  address   String?
+  phone     String?
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   players     Player[]
   tournaments Tournament[]
@@ -213,11 +207,12 @@ model Tournament {
   participantsCount    Int                @default(0) @map("participants_count")
   processed            Boolean            @default(false)
   createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  organizer    User         @relation("OrganizedTournaments", fields: [organizerId], references: [id])
-  club         Club?        @relation(fields: [clubId], references: [id])
-  participants TournamentParticipant[]
-  matches      Match[]
+  organizer     User                    @relation("OrganizedTournaments", fields: [organizerId], references: [id])
+  club          Club?                   @relation(fields: [clubId], references: [id])
+  participants  TournamentParticipant[]
+  matches       Match[]
   ratingChanges RatingChange[]
 
   @@index([status])
@@ -226,15 +221,16 @@ model Tournament {
 }
 
 model TournamentParticipant {
-  tournamentId       String  @map("tournament_id")
-  playerId           String  @map("player_id")
+  tournamentId       String   @map("tournament_id")
+  playerId           String   @map("player_id")
   seed               Int?
-  finalPosition      Int?    @map("final_position")
-  ratingBefore       Float   @map("rating_before")
-  rdBefore           Float   @map("rd_before")
-  ratingAfter        Float?  @map("rating_after")
-  rdAfter            Float?  @map("rd_after")
-  ratingDeltaDisplay Int?    @map("rating_delta_display")
+  finalPosition      Int?     @map("final_position")
+  ratingBefore       Float    @map("rating_before")
+  rdBefore           Float    @map("rd_before")
+  ratingAfter        Float?   @map("rating_after")
+  rdAfter            Float?   @map("rd_after")
+  ratingDeltaDisplay Int?     @map("rating_delta_display")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   tournament Tournament @relation(fields: [tournamentId], references: [id])
   player     Player     @relation(fields: [playerId], references: [id])
@@ -257,9 +253,10 @@ model Match {
   playedAt     DateTime?   @map("played_at")
   enteredBy    String?     @map("entered_by")
   status       MatchStatus @default(scheduled)
+  updatedAt    DateTime    @updatedAt @map("updated_at")
 
-  tournament Tournament @relation(fields: [tournamentId], references: [id])
-  enteredByUser User?   @relation("EnteredMatches", fields: [enteredBy], references: [id])
+  tournament    Tournament @relation(fields: [tournamentId], references: [id])
+  enteredByUser User?      @relation("EnteredMatches", fields: [enteredBy], references: [id])
 
   @@index([tournamentId])
   @@index([player1Id])
@@ -268,35 +265,36 @@ model Match {
 }
 
 model RatingChange {
-  id                  String           @id @default(uuid())
-  playerId            String           @map("player_id")
-  tournamentId        String?          @map("tournament_id")
-  ratingBefore        Float            @map("rating_before")
-  ratingAfter         Float            @map("rating_after")
-  rdBefore            Float            @map("rd_before")
-  rdAfter             Float            @map("rd_after")
-  changeType          RatingChangeType @map("change_type")
-  formulaVersion      String           @map("formula_version")
-  coefficientsSnapshot Json            @map("coefficients_snapshot")
-  reason              String?
-  changedBy           String?          @map("changed_by")
-  createdAt           DateTime         @default(now()) @map("created_at")
+  id                   String           @id @default(uuid())
+  playerId             String           @map("player_id")
+  tournamentId         String?          @map("tournament_id")
+  ratingBefore         Float            @map("rating_before")
+  ratingAfter          Float            @map("rating_after")
+  rdBefore             Float            @map("rd_before")
+  rdAfter              Float            @map("rd_after")
+  changeType           RatingChangeType @map("change_type")
+  formulaVersion       String           @map("formula_version")
+  coefficientsSnapshot Json             @map("coefficients_snapshot")
+  reason               String?
+  changedBy            String?          @map("changed_by")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
 
-  player     Player      @relation(fields: [playerId], references: [id])
-  tournament Tournament? @relation(fields: [tournamentId], references: [id])
-  changedByUser User?    @relation("ManualRatingChanges", fields: [changedBy], references: [id])
+  player        Player      @relation(fields: [playerId], references: [id])
+  tournament    Tournament? @relation(fields: [tournamentId], references: [id])
+  changedByUser User?       @relation("ManualRatingChanges", fields: [changedBy], references: [id])
 
   @@index([playerId, createdAt])
   @@map("rating_changes")
 }
 
 model RatingSnapshot {
-  playerId      String   @map("player_id")
-  snapshotDate  DateTime @map("snapshot_date") @db.Date
-  rating        Float
-  rd            Float
-  rankOverall   Int?     @map("rank_overall")
-  rankCategory  Int?     @map("rank_category")
+  playerId     String   @map("player_id")
+  snapshotDate DateTime @map("snapshot_date") @db.Date
+  rating       Float
+  rd           Float
+  rankOverall  Int?     @map("rank_overall")
+  rankCategory Int?     @map("rank_category")
 
   player Player @relation(fields: [playerId], references: [id])
 
@@ -306,12 +304,12 @@ model RatingSnapshot {
 }
 
 model RatingConfig {
-  key       String   @id
+  key       String    @id
   value     Json
   validFrom DateTime? @map("valid_from")
   validTo   DateTime? @map("valid_to")
-  updatedBy String?  @map("updated_by")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   updatedByUser User? @relation("ConfigUpdates", fields: [updatedBy], references: [id])
 
