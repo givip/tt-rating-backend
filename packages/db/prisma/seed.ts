@@ -229,6 +229,11 @@ async function main() {
     update: {},
     create: { key: 'provisional_threshold', value: 5 },
   });
+  await prisma.ratingConfig.upsert({
+    where: { key: 'casual_weight_multiplier' },
+    update: {},
+    create: { key: 'casual_weight_multiplier', value: 0.3 },
+  });
 
   // --- Refresh leaderboard materialized view ---
   await prisma.$executeRaw`REFRESH MATERIALIZED VIEW CONCURRENTLY leaderboard`;

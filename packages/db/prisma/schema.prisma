@@ -63,6 +63,14 @@ enum MatchStatus {
   in_progress
   completed
   disputed
+  pending_opponent
+  rejected
+  expired
+}
+
+enum MatchType {
+  tournament
+  casual
 }
 
 enum RatingChangeType {
@@ -241,7 +249,9 @@ model TournamentParticipant {
 
 model Match {
   id           String      @id @default(uuid())
-  tournamentId String      @map("tournament_id")
+  tournamentId String?     @map("tournament_id")
+  matchType    MatchType   @default(tournament) @map("match_type")
+  proposerId   String?     @map("proposer_id")
   round        Int
   player1Id    String      @map("player1_id")
   player2Id    String      @map("player2_id")
@@ -251,16 +261,20 @@ model Match {
   scoreDetails Json?       @map("score_details")
   matchWeight  Float       @default(1.0) @map("match_weight")
   playedAt     DateTime?   @map("played_at")
+  confirmedAt  DateTime?   @map("confirmed_at")
+  expiresAt    DateTime?   @map("expires_at")
   enteredBy    String?     @map("entered_by")
   status       MatchStatus @default(scheduled)
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
-  tournament    Tournament @relation(fields: [tournamentId], references: [id])
-  enteredByUser User?      @relation("EnteredMatches", fields: [enteredBy], references: [id])
+  tournament    Tournament? @relation(fields: [tournamentId], references: [id])
+  enteredByUser User?       @relation("EnteredMatches", fields: [enteredBy], references: [id])
 
   @@index([tournamentId])
   @@index([player1Id])
   @@index([player2Id])
+  @@index([player1Id, matchType, status])
+  @@index([player2Id, matchType, status])
   @@map("matches")
 }
 
