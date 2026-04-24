@@ -250,7 +250,7 @@ export class TournamentsService {
       data: { status: 'completed' },
     });
 
-    await this.ratingJob.trigger(tournamentId);
+    await this.ratingJob.trigger({ tournamentId });
 
     return { message: 'Tournament finalized — rating calculation queued' };
   }

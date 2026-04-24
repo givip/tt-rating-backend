@@ -64,6 +64,7 @@ enum MatchStatus {
   completed
   disputed
   pending_opponent
+  confirmed
   rejected
   expired
 }
@@ -75,6 +76,7 @@ enum MatchType {
 
 enum RatingChangeType {
   tournament
+  casual
   manual
   initial_import
 }

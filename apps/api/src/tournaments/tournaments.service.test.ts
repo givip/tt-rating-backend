@@ -211,7 +211,7 @@ describe('TournamentsService', () => {
       mockRatingJob.trigger.mockResolvedValue(undefined);
 
       await service.finalize('t1', adminActor);
-      expect(mockRatingJob.trigger).toHaveBeenCalledWith('t1');
+      expect(mockRatingJob.trigger).toHaveBeenCalledWith({ tournamentId: 't1' });
     });
 
     it('returns early if already processed', async () => {
@@ -243,7 +243,7 @@ describe('TournamentsService', () => {
         where: { id: 't1' },
         data: { status: 'completed' },
       });
-      expect(mockRatingJob.trigger).toHaveBeenCalledWith('t1');
+      expect(mockRatingJob.trigger).toHaveBeenCalledWith({ tournamentId: 't1' });
       expect(result.message).toBeTruthy();
     });
   });

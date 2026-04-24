@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { processTournament } from '@tt-rating/rating-job';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { processCasualMatch, processTournament } from '@tt-rating/rating-job';
 import { PrismaService } from '../common/prisma.service';
-import type { RatingJobTrigger } from './rating-job-trigger.interface';
+import type {
+  RatingJobInput,
+  RatingJobTrigger,
+} from './rating-job-trigger.interface';
 
 /**
  * Default `RatingJobTrigger` binding. Runs the rating worker synchronously
@@ -17,7 +20,17 @@ import type { RatingJobTrigger } from './rating-job-trigger.interface';
 export class InProcessRatingJobTrigger implements RatingJobTrigger {
   constructor(private prisma: PrismaService) {}
 
-  async trigger(tournamentId: string): Promise<void> {
-    await processTournament(tournamentId, this.prisma);
+  async trigger(input: RatingJobInput): Promise<void> {
+    const { tournamentId, matchId } = input;
+    if (!!tournamentId === !!matchId) {
+      throw new BadRequestException(
+        'RatingJobTrigger: exactly one of { tournamentId, matchId } must be set',
+      );
+    }
+    if (tournamentId) {
+      await processTournament(tournamentId, this.prisma);
+    } else {
+      await processCasualMatch(matchId!, this.prisma);
+    }
   }
 }

@@ -158,18 +158,115 @@ export async function processTournament(
   console.log(`Rating job complete for tournament: ${tournamentId}`);
 }
 
+/**
+ * Process a single casual match. Called on accept — the match has already
+ * been validated and flipped to `confirmed` by the API. This job:
+ *
+ *  1. Acquires Postgres advisory locks on both player IDs (sorted order) so
+ *     concurrent invocations for the same player serialize inside Postgres
+ *     without lost updates.
+ *  2. Re-reads both players' current rating/rd inside the transaction (values
+ *     may have changed between confirm and job-start due to another match).
+ *  3. Runs one Glicko step per player against their opponent.
+ *  4. Writes two RatingChange rows (tournamentId = null, changeType = casual).
+ *  5. Refreshes the leaderboard materialized view outside the transaction.
+ */
+export async function processCasualMatch(
+  matchId: string,
+  prisma: PrismaClient,
+): Promise<void> {
+  console.log(`Starting casual-match rating job for ${matchId}`);
+
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const match = await tx.match.findUnique({ where: { id: matchId } });
+    if (!match) throw new Error(`Match ${matchId} not found`);
+    if (match.matchType !== 'casual') {
+      throw new Error(`Match ${matchId} is not a casual match`);
+    }
+    if (match.status !== 'confirmed') {
+      throw new Error(
+        `Match ${matchId} is not confirmed (status=${match.status})`,
+      );
+    }
+
+    // Acquire advisory locks on both players in ascending UUID order so two
+    // concurrent jobs sharing one player deadlock-free-serialize. Using
+    // hashtextextended + two-int form so a 64-bit hash fits cleanly.
+    const [loId, hiId] =
+      match.player1Id < match.player2Id
+        ? [match.player1Id, match.player2Id]
+        : [match.player2Id, match.player1Id];
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${loId}, 0))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${hiId}, 0))`;
+
+    const [p1, p2] = await Promise.all([
+      tx.player.findUnique({ where: { id: match.player1Id } }),
+      tx.player.findUnique({ where: { id: match.player2Id } }),
+    ]);
+    if (!p1 || !p2) throw new Error('Player missing after lock');
+
+    const FORMULA_VERSION = '1.0.0';
+    const coefficients = { c: 63.2, scale: 0.6, offset: 500, Q: 'log(10)/400' };
+
+    for (const [self, opp] of [[p1, p2], [p2, p1]] as const) {
+      const { newRating, newRD } = calculateGlicko(
+        self.internalRating,
+        self.rd,
+        [
+          {
+            opponentRating: opp.internalRating,
+            opponentRD: opp.rd,
+            score: match.winnerId === self.id ? 1 : 0,
+            matchWeight: match.matchWeight,
+          },
+        ],
+      );
+
+      await tx.player.update({
+        where: { id: self.id },
+        data: { internalRating: newRating, rd: newRD },
+      });
+
+      await tx.ratingChange.create({
+        data: {
+          playerId: self.id,
+          tournamentId: null,
+          ratingBefore: self.internalRating,
+          ratingAfter: newRating,
+          rdBefore: self.rd,
+          rdAfter: newRD,
+          changeType: 'casual',
+          formulaVersion: FORMULA_VERSION,
+          coefficientsSnapshot: coefficients,
+        },
+      });
+    }
+  });
+
+  await prisma.$executeRaw`REFRESH MATERIALIZED VIEW CONCURRENTLY leaderboard`;
+
+  console.log(`Casual-match rating job complete for ${matchId}`);
+}
+
 async function main() {
   const tournamentId = process.env.TOURNAMENT_ID;
-  if (!tournamentId) {
-    throw new Error('TOURNAMENT_ID environment variable is required');
+  const matchId = process.env.MATCH_ID;
+  if (!!tournamentId === !!matchId) {
+    throw new Error(
+      'Exactly one of TOURNAMENT_ID or MATCH_ID environment variables is required',
+    );
   }
 
-  // The CLI entry-point owns its own Prisma client; `processTournament`
-  // leaves lifecycle to the caller so in-process triggers can share the
+  // The CLI entry-point owns its own Prisma client; the worker functions
+  // leave lifecycle to the caller so in-process triggers can share the
   // API's already-connected client without flipping it into disconnect.
   const prisma = new PrismaClient();
   try {
-    await processTournament(tournamentId, prisma);
+    if (tournamentId) {
+      await processTournament(tournamentId, prisma);
+    } else {
+      await processCasualMatch(matchId!, prisma);
+    }
   } finally {
     await prisma.$disconnect();
   }
