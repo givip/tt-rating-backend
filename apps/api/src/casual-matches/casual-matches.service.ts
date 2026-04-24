@@ -104,6 +104,85 @@ export class CasualMatchesService {
     });
   }
 
+  async accept(matchId: string, actor: Actor) {
+    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) throw new NotFoundException('Match not found');
+
+    const caller = await this.prisma.player.findUnique({
+      where: { userId: actor.userId },
+    });
+    if (!caller || caller.id !== match.player2Id) {
+      throw new BadRequestException('Only the opponent can accept this match');
+    }
+
+    if (match.status !== 'pending_opponent') {
+      throw new BadRequestException(
+        `Match is not pending (status=${match.status})`,
+      );
+    }
+
+    if (match.expiresAt && match.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('Match has expired');
+    }
+
+    const updated = await this.prisma.match.update({
+      where: { id: matchId },
+      data: { status: 'confirmed', confirmedAt: new Date() },
+    });
+
+    // Fire-and-forget: failure here should surface via logging, not block the
+    // accept response. Await to propagate synchronous validation errors from
+    // the trigger (e.g. wrong args), but the actual rating job runs async in
+    // production (Cloud Run Job).
+    await this.ratingJob.trigger({ matchId });
+
+    return updated;
+  }
+
+  async reject(matchId: string, actor: Actor) {
+    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) throw new NotFoundException('Match not found');
+
+    const caller = await this.prisma.player.findUnique({
+      where: { userId: actor.userId },
+    });
+    if (!caller || caller.id !== match.player2Id) {
+      throw new BadRequestException('Only the opponent can reject this match');
+    }
+
+    if (match.status !== 'pending_opponent') {
+      throw new BadRequestException(
+        `Match is not pending (status=${match.status})`,
+      );
+    }
+
+    return this.prisma.match.update({
+      where: { id: matchId },
+      data: { status: 'rejected' },
+    });
+  }
+
+  async cancel(matchId: string, actor: Actor) {
+    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) throw new NotFoundException('Match not found');
+
+    const caller = await this.prisma.player.findUnique({
+      where: { userId: actor.userId },
+    });
+    if (!caller || caller.id !== match.proposerId) {
+      throw new BadRequestException('Only the proposer can cancel this match');
+    }
+
+    if (match.status !== 'pending_opponent') {
+      throw new BadRequestException(
+        `Match cannot be cancelled (status=${match.status})`,
+      );
+    }
+
+    await this.prisma.match.delete({ where: { id: matchId } });
+    return { ok: true };
+  }
+
   private async readCasualMultiplier(): Promise<number> {
     const row = await this.prisma.ratingConfig.findUnique({
       where: { key: 'casual_weight_multiplier' },
