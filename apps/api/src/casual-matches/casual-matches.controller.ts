@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -27,6 +28,17 @@ const ProposeDto = z
   })
   .strict();
 
+function parseProposeBody(body: unknown) {
+  try {
+    return ProposeDto.parse(body);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      throw new BadRequestException('Invalid request body');
+    }
+    throw err;
+  }
+}
+
 type AuthedRequest = FastifyRequest & { user: { userId: string; role: string } };
 
 @ApiTags('casual-matches')
@@ -41,7 +53,7 @@ export class CasualMatchesController {
   @ApiOperation({ summary: 'Propose a casual match (non-provisional players only)' })
   @ZodBody(ProposeDto)
   async propose(@Req() req: AuthedRequest, @Body() body: unknown) {
-    const dto = ProposeDto.parse(body);
+    const dto = parseProposeBody(body);
     return this.casuals.propose(dto, req.user);
   }
 
