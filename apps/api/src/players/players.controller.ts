@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ZodBody } from '../common/zod-swagger';
 import { PlayersService } from './players.service';
 import { CreatePlayerSchema, PlayerListQuerySchema } from '@tt-rating/types';
 
@@ -24,6 +25,7 @@ export class PlayersController {
   @Post()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create player profile' })
+  @ZodBody(CreatePlayerSchema)
   async create(@Body() body: unknown) {
     const dto = CreatePlayerSchema.parse(body);
     // TODO: extract userId from JWT guard — for now accept as header for testing

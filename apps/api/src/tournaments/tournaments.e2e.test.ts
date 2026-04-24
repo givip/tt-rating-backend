@@ -59,6 +59,7 @@ const mockPrisma = {
   tournamentParticipant: { create: vi.fn(), findMany: vi.fn() },
   player: { findUnique: vi.fn() },
   refreshToken: { create: vi.fn(), updateMany: vi.fn() },
+  match: { create: vi.fn() },
 };
 
 const mockRatingJob = { trigger: vi.fn() };
@@ -121,6 +122,7 @@ describe('Tournaments E2E (Phase 2 smoke)', () => {
       mockPrisma.tournamentParticipant.create,
       mockPrisma.tournamentParticipant.findMany,
       mockPrisma.player.findUnique,
+      mockPrisma.match.create,
       mockRatingJob.trigger,
     ]) {
       fn.mockReset();
@@ -230,5 +232,91 @@ describe('Tournaments E2E (Phase 2 smoke)', () => {
     });
     expect(res.statusCode).toBe(201);
     expect(mockPrisma.tournamentParticipant.create).toHaveBeenCalled();
+  });
+
+  describe('POST /tournaments/:id/matches', () => {
+    const tournamentRecord = {
+      id: 't-A',
+      organizerId: 'org-A',
+      processed: false,
+      matchFormat: 'bo5' as const,
+      participants: [
+        { playerId: '11111111-1111-1111-1111-111111111111' },
+        { playerId: '22222222-2222-2222-2222-222222222222' },
+      ],
+    };
+    const validPayload = {
+      round: 1,
+      player1Id: '11111111-1111-1111-1111-111111111111',
+      player2Id: '22222222-2222-2222-2222-222222222222',
+      winnerId: '11111111-1111-1111-1111-111111111111',
+      setsPlayer1: 3,
+      setsPlayer2: 0,
+    };
+
+    it('rejects with no Authorization header (401)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/tournaments/t-A/matches',
+        payload: validPayload,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('rejects a player role (403)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/tournaments/t-A/matches',
+        headers: { authorization: `Bearer ${playerToken}` },
+        payload: validPayload,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('rejects malformed body with 400 (zod)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/tournaments/t-A/matches',
+        headers: { authorization: `Bearer ${organizerAToken}` },
+        payload: { round: 1, player1Id: 'not-a-uuid', player2Id: 'also-not' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(mockPrisma.match.create).not.toHaveBeenCalled();
+    });
+
+    it('organizer B cannot create matches in A\'s tournament (403)', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentRecord);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/tournaments/t-A/matches',
+        headers: { authorization: `Bearer ${organizerBToken}` },
+        payload: validPayload,
+      });
+      expect(res.statusCode).toBe(403);
+      expect(mockPrisma.match.create).not.toHaveBeenCalled();
+    });
+
+    it('organizer A can create a match in their tournament', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentRecord);
+      mockPrisma.match.create.mockResolvedValue({ id: 'm-1' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/tournaments/t-A/matches',
+        headers: { authorization: `Bearer ${organizerAToken}` },
+        payload: validPayload,
+      });
+      expect(res.statusCode).toBe(201);
+      expect(mockPrisma.match.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tournamentId: 't-A',
+          player1Id: validPayload.player1Id,
+          player2Id: validPayload.player2Id,
+          winnerId: validPayload.winnerId,
+          matchWeight: 1.0, // bo5 3:0
+          enteredBy: 'org-A',
+          status: 'completed',
+        }),
+      });
+    });
   });
 });

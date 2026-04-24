@@ -26,7 +26,7 @@ Self-host to run your own national or club-level rating system.
 ```bash
 git clone https://github.com/tt-rating/backend tt-rating-backend
 # Sibling clone of the core library — referenced via file link from this repo.
-git clone https://github.com/tt-rating/core ../tt-rating-core
+git clone https://github.com/tt-rating/core ../core
 
 cd tt-rating-backend
 cp .env.example .env        # fill in DATABASE_URL and JWT_SECRET

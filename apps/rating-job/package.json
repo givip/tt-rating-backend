@@ -2,6 +2,8 @@
   "name": "@tt-rating/rating-job",
   "version": "0.1.0",
   "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -10,7 +12,8 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "@tt-rating/core": "file:../../../tt-rating-core"
+    "@tt-rating/core": "file:../../../core",
+    "@tt-rating/db": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

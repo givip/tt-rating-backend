@@ -16,7 +16,7 @@
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/platform-fastify": "^10.4.0",
     "@nestjs/swagger": "^7.4.0",
-    "@tt-rating/core": "file:../../../tt-rating-core",
+    "@tt-rating/core": "file:../../../core",
     "@tt-rating/db": "workspace:*",
     "@tt-rating/rating-job": "workspace:*",
     "@tt-rating/types": "workspace:*",
@@ -24,7 +24,8 @@
     "fastify": "^4.28.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",

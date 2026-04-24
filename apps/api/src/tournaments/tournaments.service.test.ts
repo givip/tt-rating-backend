@@ -22,6 +22,7 @@ const mockPrisma = {
     findMany: vi.fn(),
   },
   player: { findUnique: vi.fn() },
+  match: { create: vi.fn() },
 };
 
 const mockRatingJob = { trigger: vi.fn() };
@@ -253,6 +254,161 @@ describe('TournamentsService', () => {
       await service.create(organizerActor, { title: 'Foo' });
       expect(mockPrisma.tournament.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ organizerId: 'org-1', title: 'Foo' }),
+      });
+    });
+  });
+
+  describe('createMatch', () => {
+    // A tournament with two registered participants that most createMatch
+    // tests share; individual tests override fields they care about.
+    const base = {
+      id: 't1',
+      organizerId: 'org-1',
+      processed: false,
+      matchFormat: 'bo5' as const,
+      participants: [{ playerId: 'p1' }, { playerId: 'p2' }],
+    };
+
+    const validInput = {
+      round: 1,
+      player1Id: 'p1',
+      player2Id: 'p2',
+      winnerId: 'p1',
+      setsPlayer1: 3,
+      setsPlayer2: 1,
+    };
+
+    it('throws NotFoundException when tournament is missing', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(null);
+      await expect(
+        service.createMatch('t-missing', validInput, organizerActor),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.match.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when caller is not the organizer', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      await expect(
+        service.createMatch('t1', validInput, otherOrganizerActor),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.match.create).not.toHaveBeenCalled();
+    });
+
+    it('admin can create matches in any tournament', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      mockPrisma.match.create.mockResolvedValue({ id: 'm-new' });
+      await service.createMatch('t1', validInput, adminActor);
+      expect(mockPrisma.match.create).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when tournament is already processed', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue({ ...base, processed: true });
+      await expect(
+        service.createMatch('t1', validInput, organizerActor),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when player1Id equals player2Id', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      await expect(
+        service.createMatch(
+          't1',
+          { ...validInput, player2Id: 'p1' },
+          organizerActor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when a player is not a participant', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      await expect(
+        service.createMatch(
+          't1',
+          { ...validInput, player2Id: 'p-stranger' },
+          organizerActor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when winnerId is not one of the players', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      await expect(
+        service.createMatch(
+          't1',
+          { ...validInput, winnerId: 'p-other' },
+          organizerActor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when only one set count is provided', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      await expect(
+        service.createMatch(
+          't1',
+          { ...validInput, setsPlayer2: undefined },
+          organizerActor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("throws BadRequestException when winner's set count is not greater than loser's", async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      await expect(
+        service.createMatch(
+          't1',
+          { ...validInput, setsPlayer1: 2, setsPlayer2: 3 },
+          organizerActor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('creates a match with matchWeight derived from the tournament format', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      mockPrisma.match.create.mockResolvedValue({ id: 'm-new' });
+
+      await service.createMatch(
+        't1',
+        { ...validInput, setsPlayer1: 3, setsPlayer2: 2 },
+        organizerActor,
+      );
+
+      expect(mockPrisma.match.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tournamentId: 't1',
+          player1Id: 'p1',
+          player2Id: 'p2',
+          winnerId: 'p1',
+          setsPlayer1: 3,
+          setsPlayer2: 2,
+          matchWeight: 0.8, // bo5 3:2
+          enteredBy: 'org-1',
+          status: 'completed',
+        }),
+      });
+    });
+
+    it('allows creating a scheduled match without sets or winner', async () => {
+      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      mockPrisma.match.create.mockResolvedValue({ id: 'm-new' });
+
+      await service.createMatch(
+        't1',
+        { round: 1, player1Id: 'p1', player2Id: 'p2' },
+        organizerActor,
+      );
+
+      expect(mockPrisma.match.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tournamentId: 't1',
+          player1Id: 'p1',
+          player2Id: 'p2',
+          winnerId: null,
+          setsPlayer1: null,
+          setsPlayer2: null,
+          matchWeight: 1.0,
+          status: 'scheduled',
+        }),
       });
     });
   });

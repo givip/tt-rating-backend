@@ -126,6 +126,112 @@ export class TournamentsService {
     });
   }
 
+  /**
+   * Create a match within a tournament. Mutations are blocked once the
+   * tournament has been processed — that's the moment its matches become
+   * the input to the rating recompute, and retroactive changes would
+   * invalidate every downstream RatingChange / leaderboard row.
+   *
+   * `matchWeight` is derived from the tournament's `matchFormat` + set
+   * counts so organizers never set it directly — the Glicko engine treats
+   * weight as a decisive-ness multiplier, and letting organizers pick it
+   * would be a trivial way to rig ratings.
+   */
+  async createMatch(
+    tournamentId: string,
+    input: {
+      round: number;
+      player1Id: string;
+      player2Id: string;
+      winnerId?: string | null;
+      setsPlayer1?: number | null;
+      setsPlayer2?: number | null;
+      scoreDetails?: unknown;
+      playedAt?: Date | null;
+    },
+    actor: Actor,
+  ) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      select: {
+        id: true,
+        organizerId: true,
+        processed: true,
+        matchFormat: true,
+        participants: { select: { playerId: true } },
+      },
+    });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+    this.assertCanModify(tournament, actor);
+
+    if (tournament.processed) {
+      throw new BadRequestException(
+        'Cannot add matches to a processed tournament',
+      );
+    }
+
+    if (input.player1Id === input.player2Id) {
+      throw new BadRequestException('player1Id and player2Id must differ');
+    }
+
+    const participantIds = new Set(tournament.participants.map((p) => p.playerId));
+    if (!participantIds.has(input.player1Id) || !participantIds.has(input.player2Id)) {
+      throw new BadRequestException('Both players must be tournament participants');
+    }
+
+    if (input.winnerId != null && input.winnerId !== input.player1Id && input.winnerId !== input.player2Id) {
+      throw new BadRequestException('winnerId must be one of the two players');
+    }
+
+    const s1 = input.setsPlayer1;
+    const s2 = input.setsPlayer2;
+    const hasSets = s1 != null || s2 != null;
+    if (hasSets && (s1 == null || s2 == null)) {
+      throw new BadRequestException(
+        'setsPlayer1 and setsPlayer2 must both be provided or both omitted',
+      );
+    }
+
+    let matchWeight = 1.0;
+    if (hasSets && input.winnerId != null) {
+      const winnerSets = input.winnerId === input.player1Id ? s1! : s2!;
+      const loserSets = input.winnerId === input.player1Id ? s2! : s1!;
+      if (winnerSets <= loserSets) {
+        throw new BadRequestException(
+          "winner's set count must be greater than loser's",
+        );
+      }
+      matchWeight = this.calculateMatchWeight(
+        tournament.matchFormat,
+        winnerSets,
+        loserSets,
+      );
+    }
+
+    // A match with a winner + sets is already a recorded result; anything
+    // missing either is still pending. We deliberately don't surface an
+    // "in_progress" shortcut here — organizers can PATCH the row later
+    // when that endpoint lands.
+    const status = input.winnerId != null && hasSets ? 'completed' : 'scheduled';
+
+    return this.prisma.match.create({
+      data: {
+        tournamentId,
+        round: input.round,
+        player1Id: input.player1Id,
+        player2Id: input.player2Id,
+        winnerId: input.winnerId ?? null,
+        setsPlayer1: s1 ?? null,
+        setsPlayer2: s2 ?? null,
+        scoreDetails: (input.scoreDetails as any) ?? null,
+        matchWeight,
+        playedAt: input.playedAt ?? null,
+        enteredBy: actor.userId,
+        status,
+      },
+    });
+  }
+
   async finalize(tournamentId: string, actor: Actor) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },

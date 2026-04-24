@@ -11,6 +11,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
+import { ZodBody } from '../common/zod-swagger';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import {
   AUTH_STRATEGY,
@@ -57,6 +58,7 @@ export class AuthController {
   @Post('initiate')
   @HttpCode(200)
   @ApiOperation({ summary: 'Initiate auth flow (e.g. send OTP)' })
+  @ZodBody(InitiateDto)
   async initiate(
     @Body() body: unknown,
     @Req() req: FastifyRequest,
@@ -71,6 +73,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @ApiOperation({ summary: 'Complete auth flow and receive tokens' })
+  @ZodBody(LoginDto)
   async login(
     @Body() body: unknown,
     @Req() req: FastifyRequest,
@@ -87,6 +90,7 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(200)
   @ApiOperation({ summary: 'Rotate refresh token, mint new access token' })
+  @ZodBody(RefreshDto)
   async refresh(@Body() body: unknown) {
     const { refreshToken } = parseBody(RefreshDto, body);
     return this.tokens.rotate(refreshToken);

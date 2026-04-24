@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@tt-rating/db';
 import { calculateGlicko, toDisplayRating, MatchInput } from '@tt-rating/core';
 
 type MinimalMatch = {
@@ -175,7 +175,10 @@ async function main() {
   }
 }
 
-if (!process.env.VITEST) {
+// Only run the CLI when this file is the Node entry point. Other consumers
+// (InProcessRatingJobTrigger in the API) import { processTournament } and
+// must not trigger the TOURNAMENT_ID env check at module load.
+if (require.main === module) {
   main().catch((e) => {
     console.error('Rating job failed:', e);
     process.exit(1);
