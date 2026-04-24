@@ -125,10 +125,17 @@ export class CasualMatchesService {
       throw new BadRequestException('Match has expired');
     }
 
-    const updated = await this.prisma.match.update({
-      where: { id: matchId },
+    // Atomic status transition: only flip to `confirmed` if still pending.
+    // Guards against two concurrent accepts or an accept/cancel race.
+    const result = await this.prisma.match.updateMany({
+      where: { id: matchId, status: 'pending_opponent' },
       data: { status: 'confirmed', confirmedAt: new Date() },
     });
+    if (result.count === 0) {
+      throw new BadRequestException(
+        'Match is no longer pending (may have been accepted, rejected, or cancelled by another request)',
+      );
+    }
 
     // Fire-and-forget: failure here should surface via logging, not block the
     // accept response. Await to propagate synchronous validation errors from
@@ -136,7 +143,7 @@ export class CasualMatchesService {
     // production (Cloud Run Job).
     await this.ratingJob.trigger({ matchId });
 
-    return updated;
+    return this.prisma.match.findUnique({ where: { id: matchId } });
   }
 
   async reject(matchId: string, actor: Actor) {
@@ -156,10 +163,17 @@ export class CasualMatchesService {
       );
     }
 
-    return this.prisma.match.update({
-      where: { id: matchId },
+    const result = await this.prisma.match.updateMany({
+      where: { id: matchId, status: 'pending_opponent' },
       data: { status: 'rejected' },
     });
+    if (result.count === 0) {
+      throw new BadRequestException(
+        'Match is no longer pending (may have been accepted, rejected, or cancelled by another request)',
+      );
+    }
+
+    return this.prisma.match.findUnique({ where: { id: matchId } });
   }
 
   async cancel(matchId: string, actor: Actor) {
@@ -179,7 +193,14 @@ export class CasualMatchesService {
       );
     }
 
-    await this.prisma.match.delete({ where: { id: matchId } });
+    const result = await this.prisma.match.deleteMany({
+      where: { id: matchId, status: 'pending_opponent' },
+    });
+    if (result.count === 0) {
+      throw new BadRequestException(
+        'Match is no longer pending (may have been accepted, rejected, or cancelled by another request)',
+      );
+    }
     return { ok: true };
   }
 

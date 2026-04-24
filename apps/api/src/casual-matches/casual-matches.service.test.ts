@@ -4,7 +4,7 @@ import { CasualMatchesService } from './casual-matches.service';
 
 const mockPrisma: any = {
   player: { findUnique: vi.fn() },
-  match: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  match: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
   ratingConfig: { findUnique: vi.fn() },
 };
 const mockTrigger = { trigger: vi.fn() };
@@ -20,7 +20,9 @@ beforeEach(() => {
     mockPrisma.match.findUnique,
     mockPrisma.match.findMany,
     mockPrisma.match.update,
+    mockPrisma.match.updateMany,
     mockPrisma.match.delete,
+    mockPrisma.match.deleteMany,
     mockPrisma.ratingConfig.findUnique,
     mockTrigger.trigger,
   ]) fn.mockReset();
@@ -199,15 +201,25 @@ describe('CasualMatchesService.accept', () => {
   it('flips to confirmed, stamps confirmedAt, calls trigger({ matchId })', async () => {
     mockPrisma.match.findUnique.mockResolvedValue(baseMatch);
     mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-bob', userId: 'u-bob' });
-    mockPrisma.match.update.mockResolvedValue({ ...baseMatch, status: 'confirmed' });
+    mockPrisma.match.updateMany.mockResolvedValue({ count: 1 });
 
     await newService().accept('m-1', bob);
 
-    const updateCall = mockPrisma.match.update.mock.calls[0][0];
-    expect(updateCall.where).toEqual({ id: 'm-1' });
-    expect(updateCall.data.status).toBe('confirmed');
-    expect(updateCall.data.confirmedAt).toBeInstanceOf(Date);
+    expect(mockPrisma.match.updateMany).toHaveBeenCalledWith({
+      where: { id: 'm-1', status: 'pending_opponent' },
+      data: { status: 'confirmed', confirmedAt: expect.any(Date) },
+    });
+    expect(mockTrigger.trigger).toHaveBeenCalledTimes(1);
     expect(mockTrigger.trigger).toHaveBeenCalledWith({ matchId: 'm-1' });
+  });
+
+  it('throws when updateMany returns count 0 (race lost) and does not trigger', async () => {
+    mockPrisma.match.findUnique.mockResolvedValue(baseMatch);
+    mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-bob', userId: 'u-bob' });
+    mockPrisma.match.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(newService().accept('m-1', bob)).rejects.toThrow(/no longer pending/i);
+    expect(mockTrigger.trigger).not.toHaveBeenCalled();
   });
 });
 
@@ -229,11 +241,28 @@ describe('CasualMatchesService.reject', () => {
       player1Id: 'p-alice', player2Id: 'p-bob',
     });
     mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-bob', userId: 'u-bob' });
-    mockPrisma.match.update.mockResolvedValue({});
+    mockPrisma.match.updateMany.mockResolvedValue({ count: 1 });
 
     await newService().reject('m-1', { userId: 'u-bob', role: 'player' });
 
-    expect(mockPrisma.match.update.mock.calls[0][0].data.status).toBe('rejected');
+    expect(mockPrisma.match.updateMany).toHaveBeenCalledWith({
+      where: { id: 'm-1', status: 'pending_opponent' },
+      data: { status: 'rejected' },
+    });
+    expect(mockTrigger.trigger).not.toHaveBeenCalled();
+  });
+
+  it('throws when updateMany returns count 0 (race lost)', async () => {
+    mockPrisma.match.findUnique.mockResolvedValue({
+      id: 'm-1', matchType: 'casual', status: 'pending_opponent',
+      player1Id: 'p-alice', player2Id: 'p-bob',
+    });
+    mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-bob', userId: 'u-bob' });
+    mockPrisma.match.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      newService().reject('m-1', { userId: 'u-bob', role: 'player' }),
+    ).rejects.toThrow(/no longer pending/i);
     expect(mockTrigger.trigger).not.toHaveBeenCalled();
   });
 });
@@ -267,10 +296,25 @@ describe('CasualMatchesService.cancel', () => {
       player1Id: 'p-alice', proposerId: 'p-alice',
     });
     mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-alice', userId: 'u-alice' });
-    mockPrisma.match.delete.mockResolvedValue({});
+    mockPrisma.match.deleteMany.mockResolvedValue({ count: 1 });
 
     await newService().cancel('m-1', { userId: 'u-alice', role: 'player' });
 
-    expect(mockPrisma.match.delete).toHaveBeenCalledWith({ where: { id: 'm-1' } });
+    expect(mockPrisma.match.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'm-1', status: 'pending_opponent' },
+    });
+  });
+
+  it('throws when deleteMany returns count 0 (race lost)', async () => {
+    mockPrisma.match.findUnique.mockResolvedValue({
+      id: 'm-1', matchType: 'casual', status: 'pending_opponent',
+      player1Id: 'p-alice', proposerId: 'p-alice',
+    });
+    mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-alice', userId: 'u-alice' });
+    mockPrisma.match.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      newService().cancel('m-1', { userId: 'u-alice', role: 'player' }),
+    ).rejects.toThrow(/no longer pending/i);
   });
 });
