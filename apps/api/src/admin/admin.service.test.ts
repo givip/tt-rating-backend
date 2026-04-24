@@ -17,7 +17,6 @@ describe('AdminService', () => {
       gender: 'M',
       rating: '1650',
       rd: '200',
-      source: 'imported_rttf',
     };
 
     it('parses a valid row into player data', () => {
@@ -26,7 +25,6 @@ describe('AdminService', () => {
       expect(result.firstNameEn).toBe('Giorgi');
       expect(result.internalRating).toBe(1650);
       expect(result.rd).toBe(200);
-      expect(result.ratingSource).toBe('imported_rttf');
     });
 
     it('throws on invalid gender', () => {
@@ -59,7 +57,7 @@ describe('AdminService', () => {
         service.parseCsvRow({ ...{
           first_name_ka: 'A', last_name_ka: 'B',
           first_name_en: 'A', last_name_en: 'B',
-          gender: 'M', source: 'manual',
+          gender: 'M',
         }, rating: '-10', rd: '200' }),
       ).toThrow();
     });
@@ -69,7 +67,7 @@ describe('AdminService', () => {
         service.parseCsvRow({ ...{
           first_name_ka: 'A', last_name_ka: 'B',
           first_name_en: 'A', last_name_en: 'B',
-          gender: 'M', source: 'manual',
+          gender: 'M',
         }, rating: '1500', rd: '400' }),
       ).toThrow();
     });
