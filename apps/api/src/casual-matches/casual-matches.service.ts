@@ -204,6 +204,50 @@ export class CasualMatchesService {
     return { ok: true };
   }
 
+  async listPending(actor: Actor) {
+    const caller = await this.prisma.player.findUnique({
+      where: { userId: actor.userId },
+    });
+    if (!caller) throw new NotFoundException('Player profile not found');
+
+    return this.prisma.match.findMany({
+      where: {
+        matchType: 'casual',
+        status: 'pending_opponent',
+        player2Id: caller.id,
+      },
+      orderBy: { playedAt: 'desc' },
+    });
+  }
+
+  async historyForPlayer(playerId: string) {
+    return this.prisma.match.findMany({
+      where: {
+        matchType: 'casual',
+        OR: [{ player1Id: playerId }, { player2Id: playerId }],
+      },
+      orderBy: { playedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Nightly cron target: flip overdue pending matches to `expired`. Bulk
+   * updateMany keeps the operation single-statement so a large backlog
+   * doesn't slow down the cron.
+   */
+  async expireOverdue(): Promise<{ expired: number }> {
+    const now = new Date();
+    const result = await this.prisma.match.updateMany({
+      where: {
+        matchType: 'casual',
+        status: 'pending_opponent',
+        expiresAt: { lt: now },
+      },
+      data: { status: 'expired' },
+    });
+    return { expired: result.count };
+  }
+
   private async readCasualMultiplier(): Promise<number> {
     const row = await this.prisma.ratingConfig.findUnique({
       where: { key: 'casual_weight_multiplier' },

@@ -318,3 +318,57 @@ describe('CasualMatchesService.cancel', () => {
     ).rejects.toThrow(/no longer pending/i);
   });
 });
+
+describe('CasualMatchesService.listPending', () => {
+  it('returns matches where caller is player2 and status=pending_opponent', async () => {
+    mockPrisma.player.findUnique.mockResolvedValue({ id: 'p-bob', userId: 'u-bob' });
+    mockPrisma.match.findMany.mockResolvedValue([
+      { id: 'm-1', player1Id: 'p-alice', player2Id: 'p-bob' },
+    ]);
+
+    await newService().listPending({ userId: 'u-bob', role: 'player' });
+
+    expect(mockPrisma.match.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          matchType: 'casual',
+          status: 'pending_opponent',
+          player2Id: 'p-bob',
+        },
+      }),
+    );
+  });
+});
+
+describe('CasualMatchesService.historyForPlayer', () => {
+  it('returns casual matches where playerId is on either side', async () => {
+    mockPrisma.match.findMany.mockResolvedValue([]);
+    await newService().historyForPlayer('p-alice');
+    const call = mockPrisma.match.findMany.mock.calls[0][0];
+    expect(call.where.matchType).toBe('casual');
+    expect(call.where.OR).toEqual([
+      { player1Id: 'p-alice' },
+      { player2Id: 'p-alice' },
+    ]);
+  });
+});
+
+describe('CasualMatchesService.expireOverdue', () => {
+  it('flips pending_opponent rows past expiresAt to expired', async () => {
+    mockPrisma.match.update = vi.fn();
+    const updateMany = vi.fn().mockResolvedValue({ count: 2 });
+    mockPrisma.match.updateMany = updateMany;
+
+    const result = await newService().expireOverdue();
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        matchType: 'casual',
+        status: 'pending_opponent',
+        expiresAt: { lt: expect.any(Date) },
+      },
+      data: { status: 'expired' },
+    });
+    expect(result).toEqual({ expired: 2 });
+  });
+});
