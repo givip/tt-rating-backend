@@ -14,9 +14,28 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 - Added `address String?` and `phone String?` to `clubs`.
 - Migration hand-edit: `DEFAULT CURRENT_TIMESTAMP` was added to each new `updated_at NOT NULL` column so the ALTER backfills existing rows safely. `@updatedAt` continues to drive the column at the ORM layer; the DB default is a belt-and-braces for raw-SQL writes.
 
-### Breaking
+### Breaking — admin CSV import
 
 - `AdminService.parseCsvRow` no longer accepts a `source` column in the CSV. Importers must drop the column from their feeds. No migration path — the column was schema-layer-only.
+
+### Added — Casual matches (2026-04-24)
+
+- Endpoints under `/casual-matches`: `POST /` (propose), `GET /pending`, `POST /:id/accept`, `POST /:id/reject`, `DELETE /:id`; plus public `GET /players/:id/casual-matches` for history.
+- Two-sided accept flow: a non-provisional proposer (`tournamentsPlayed ≥ 5`) creates a pending match; opponent has 7 days to accept or reject. Accept immediately triggers a per-match rating job.
+- `RatingConfig.casual_weight_multiplier` (default `0.3`) — tunes how much casual matches move ratings relative to tournament matches. Final `matchWeight` = tournament set-count weight (bo5) × multiplier; stored on the row at creation so later tuning doesn't rewrite history.
+- `processCasualMatch(matchId, prisma)` in the rating-job worker: one Glicko step per player, Postgres advisory locks on both player IDs in sorted order, idempotent via status transition `confirmed → completed` inside the same transaction.
+
+### Changed — BREAKING: `RatingJobTrigger` signature
+
+- `RatingJobTrigger.trigger` now takes `{ tournamentId?: string; matchId?: string }` (exactly one required) instead of a bare `tournamentId: string`. Platform repos with custom adapters must update. The Cloud Run adapter in the ttr.ge platform repo dispatches `TOURNAMENT_ID` or `MATCH_ID` env vars accordingly.
+
+### Changed — schema (casual matches)
+
+- `MatchStatus` enum gains `pending_opponent`, `confirmed`, `rejected`, `expired`.
+- `RatingChangeType` enum gains `casual`.
+- `Match.tournamentId` is now nullable; new `matchType`, `proposerId`, `confirmedAt`, `expiresAt` columns. Casual rows carry `tournamentId = null`.
+- `Match.tournament_id` FK explicitly set to `ON DELETE RESTRICT` (prior auto-generated `ON DELETE SET NULL` would have orphaned tournament matches).
+- New composite indexes `(player1Id, matchType, status)` and `(player2Id, matchType, status)` for pending-match queries.
 
 ### Added — Pluggable auth (Phase 1)
 
