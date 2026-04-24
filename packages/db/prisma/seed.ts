@@ -1,5 +1,5 @@
 import * as bcrypt from 'bcrypt';
-import { PrismaClient, Gender, RatingSource, RatingConfidence, UserRole, TournamentFormat, MatchFormat, TournamentCategory, TournamentStatus, MatchStatus, RatingChangeType } from '../generated';
+import { PrismaClient, Gender, RatingConfidence, UserRole, TournamentFormat, MatchFormat, TournamentCategory, TournamentStatus, MatchStatus, RatingChangeType } from '../generated';
 
 const prisma = new PrismaClient();
 
@@ -75,7 +75,6 @@ async function main() {
         rd: p.rd,
         provisional: p.provisional,
         tournamentsPlayed: p.tournamentsPlayed,
-        ratingSource: RatingSource.native_ttfge,
         ratingConfidence: p.provisional ? RatingConfidence.low : RatingConfidence.high,
         isActive: true,
       },
