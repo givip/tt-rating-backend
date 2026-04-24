@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { processCasualMatch, processTournament } from '@tt-rating/rating-job';
 import { PrismaService } from '../common/prisma.service';
 import type {
@@ -22,8 +22,8 @@ export class InProcessRatingJobTrigger implements RatingJobTrigger {
 
   async trigger(input: RatingJobInput): Promise<void> {
     const { tournamentId, matchId } = input;
-    if (!!tournamentId === !!matchId) {
-      throw new BadRequestException(
+    if ((tournamentId == null) === (matchId == null)) {
+      throw new InternalServerErrorException(
         'RatingJobTrigger: exactly one of { tournamentId, matchId } must be set',
       );
     }

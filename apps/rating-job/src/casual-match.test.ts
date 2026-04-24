@@ -91,7 +91,7 @@ describe('processCasualMatch', () => {
     const prisma: any = {
       $transaction: vi.fn(async (fn: any) =>
         fn({
-          match: { findUnique: vi.fn().mockResolvedValue(match) },
+          match: { findUnique: vi.fn().mockResolvedValue(match), update: vi.fn() },
           player: {
             findUnique: vi.fn(({ where: { id } }: any) => players[id]),
             update: playerUpdate,
@@ -120,5 +120,38 @@ describe('processCasualMatch', () => {
       String(c[0]).includes('pg_advisory_xact_lock'),
     );
     expect(lockCall).toBeDefined();
+  });
+
+  it('flips match status to completed inside the transaction', async () => {
+    const matchUpdate = vi.fn();
+    const match = {
+      id: 'm-1', matchType: 'casual', status: 'confirmed',
+      player1Id: 'p-1', player2Id: 'p-2', winnerId: 'p-1', matchWeight: 0.3,
+    };
+    const players: Record<string, any> = {
+      'p-1': { id: 'p-1', internalRating: 1800, rd: 80 },
+      'p-2': { id: 'p-2', internalRating: 1700, rd: 90 },
+    };
+    const prisma: any = {
+      $transaction: vi.fn(async (fn: any) =>
+        fn({
+          match: { findUnique: vi.fn().mockResolvedValue(match), update: matchUpdate },
+          player: {
+            findUnique: vi.fn(({ where: { id } }: any) => players[id]),
+            update: vi.fn(),
+          },
+          ratingChange: { create: vi.fn() },
+          $executeRaw: vi.fn(),
+        }),
+      ),
+      $executeRaw: vi.fn(),
+    };
+
+    await processCasualMatch('m-1', prisma);
+
+    expect(matchUpdate).toHaveBeenCalledWith({
+      where: { id: 'm-1' },
+      data: { status: 'completed' },
+    });
   });
 });

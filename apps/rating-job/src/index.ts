@@ -1,6 +1,9 @@
 import { PrismaClient, Prisma } from '@tt-rating/db';
 import { calculateGlicko, toDisplayRating, MatchInput } from '@tt-rating/core';
 
+const FORMULA_VERSION = '1.0.0';
+const FORMULA_COEFFICIENTS = { c: 63.2, scale: 0.6, offset: 500, Q: 'log(10)/400' };
+
 type MinimalMatch = {
   player1Id: string;
   player2Id: string;
@@ -71,9 +74,6 @@ export async function processTournament(
     ]),
   );
 
-  const FORMULA_VERSION = '1.0.0';
-  const coefficients = { c: 63.2, scale: 0.6, offset: 500, Q: 'log(10)/400' };
-
   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     for (const participant of tournament.participants) {
       const inputs = buildGlickoInputs(
@@ -122,7 +122,7 @@ export async function processTournament(
           rdAfter: newRD,
           changeType: 'tournament',
           formulaVersion: FORMULA_VERSION,
-          coefficientsSnapshot: coefficients,
+          coefficientsSnapshot: FORMULA_COEFFICIENTS,
         },
       });
 
@@ -170,6 +170,9 @@ export async function processTournament(
  *  3. Runs one Glicko step per player against their opponent.
  *  4. Writes two RatingChange rows (tournamentId = null, changeType = casual).
  *  5. Refreshes the leaderboard materialized view outside the transaction.
+ *
+ * On success, flips match.status from `confirmed` → `completed` inside the
+ * same transaction, so retries become no-ops via the status guard.
  */
 export async function processCasualMatch(
   matchId: string,
@@ -190,8 +193,8 @@ export async function processCasualMatch(
     }
 
     // Acquire advisory locks on both players in ascending UUID order so two
-    // concurrent jobs sharing one player deadlock-free-serialize. Using
-    // hashtextextended + two-int form so a 64-bit hash fits cleanly.
+    // concurrent jobs sharing one player deadlock-free-serialize. hashtextextended
+    // returns bigint; pg_advisory_xact_lock(bigint) is the single-arg overload.
     const [loId, hiId] =
       match.player1Id < match.player2Id
         ? [match.player1Id, match.player2Id]
@@ -204,9 +207,6 @@ export async function processCasualMatch(
       tx.player.findUnique({ where: { id: match.player2Id } }),
     ]);
     if (!p1 || !p2) throw new Error('Player missing after lock');
-
-    const FORMULA_VERSION = '1.0.0';
-    const coefficients = { c: 63.2, scale: 0.6, offset: 500, Q: 'log(10)/400' };
 
     for (const [self, opp] of [[p1, p2], [p2, p1]] as const) {
       const { newRating, newRD } = calculateGlicko(
@@ -237,10 +237,15 @@ export async function processCasualMatch(
           rdAfter: newRD,
           changeType: 'casual',
           formulaVersion: FORMULA_VERSION,
-          coefficientsSnapshot: coefficients,
+          coefficientsSnapshot: FORMULA_COEFFICIENTS,
         },
       });
     }
+
+    await tx.match.update({
+      where: { id: matchId },
+      data: { status: 'completed' },
+    });
   });
 
   await prisma.$executeRaw`REFRESH MATERIALIZED VIEW CONCURRENTLY leaderboard`;
@@ -251,7 +256,7 @@ export async function processCasualMatch(
 async function main() {
   const tournamentId = process.env.TOURNAMENT_ID;
   const matchId = process.env.MATCH_ID;
-  if (!!tournamentId === !!matchId) {
+  if ((tournamentId == null) === (matchId == null)) {
     throw new Error(
       'Exactly one of TOURNAMENT_ID or MATCH_ID environment variables is required',
     );
