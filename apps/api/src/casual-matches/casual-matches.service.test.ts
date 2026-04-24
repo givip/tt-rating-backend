@@ -125,4 +125,35 @@ describe('CasualMatchesService.propose', () => {
     const data = mockPrisma.match.create.mock.calls[0][0].data;
     expect(data.matchWeight).toBeCloseTo(0.27, 5);
   });
+
+  it('rejects bo5 scores outside {3:0, 3:1, 3:2}', async () => {
+    mockPrisma.player.findUnique.mockImplementation(({ where }: any) => {
+      if (where.userId === 'u-alice') return { id: 'p-alice', tournamentsPlayed: 10 };
+      if (where.id === 'p-bob') return { id: 'p-bob', tournamentsPlayed: 30 };
+      return null;
+    });
+    mockPrisma.ratingConfig.findUnique.mockResolvedValue({
+      key: 'casual_weight_multiplier', value: 0.3,
+    });
+    // 4:1 is winner>loser but not a bo5 terminal score
+    await expect(
+      newService().propose({ ...base, setsPlayer1: 4, setsPlayer2: 1 }, proposer),
+    ).rejects.toThrow(/invalid bo5 score/i);
+  });
+
+  it('falls back to default multiplier 0.3 when RatingConfig value is non-numeric', async () => {
+    mockPrisma.player.findUnique.mockImplementation(({ where }: any) => {
+      if (where.userId === 'u-alice') return { id: 'p-alice', tournamentsPlayed: 10 };
+      if (where.id === 'p-bob') return { id: 'p-bob', tournamentsPlayed: 30 };
+      return null;
+    });
+    mockPrisma.ratingConfig.findUnique.mockResolvedValue({
+      key: 'casual_weight_multiplier', value: 'not-a-number',
+    });
+    mockPrisma.match.create.mockResolvedValue({ id: 'm-1' });
+    await newService().propose(base, proposer);
+    const data = mockPrisma.match.create.mock.calls[0][0].data;
+    // bo5 3:1 × default 0.3 = 0.27
+    expect(data.matchWeight).toBeCloseTo(0.27, 5);
+  });
 });

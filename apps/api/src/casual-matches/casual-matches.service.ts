@@ -72,9 +72,14 @@ export class CasualMatchesService {
     }
 
     const multiplier = await this.readCasualMultiplier();
-    const bo5Weight =
-      (MATCH_WEIGHTS.bo5 as Record<string, number>)[`${winnerSets}:${loserSets}`] ??
-      1.0;
+    const bo5Weight = (MATCH_WEIGHTS.bo5 as Record<string, number>)[
+      `${winnerSets}:${loserSets}`
+    ];
+    if (bo5Weight === undefined) {
+      throw new BadRequestException(
+        `Invalid bo5 score ${winnerSets}:${loserSets} — allowed: 3:0, 3:1, 3:2`,
+      );
+    }
     const matchWeight = bo5Weight * multiplier;
 
     const expiresAt = new Date(Date.now() + CASUAL_EXPIRY_DAYS * 86400 * 1000);
@@ -103,6 +108,9 @@ export class CasualMatchesService {
     const row = await this.prisma.ratingConfig.findUnique({
       where: { key: 'casual_weight_multiplier' },
     });
-    return (row?.value as number | undefined) ?? DEFAULT_CASUAL_MULTIPLIER;
+    const v = row?.value;
+    return typeof v === 'number' && Number.isFinite(v)
+      ? v
+      : DEFAULT_CASUAL_MULTIPLIER;
   }
 }
