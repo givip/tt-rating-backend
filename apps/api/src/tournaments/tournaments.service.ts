@@ -394,4 +394,67 @@ export class TournamentsService {
       });
     });
   }
+
+  /**
+   * Undo a `prepare()` so the organizer can re-draw. Allowed only while the
+   * tournament is still in `prepared` and no match has been played yet —
+   * deleting completed matches would silently invalidate the rating-impact
+   * preview shown to participants.
+   */
+  async rewind(tournamentId: string, actor: Actor): Promise<void> {
+    await this.prisma.$transaction(async (tx: any) => {
+      const t = await tx.tournament.findUnique({ where: { id: tournamentId } });
+      if (!t) throw new NotFoundException('Tournament not found');
+      this.assertCanModify(t, actor);
+      if (t.status !== 'prepared') {
+        throw new BadRequestException(
+          `can only rewind from prepared; got ${t.status}`,
+        );
+      }
+      const completed = await tx.match.count({
+        where: { tournamentId, status: 'completed' },
+      });
+      if (completed > 0) {
+        throw new BadRequestException(
+          `cannot rewind: ${completed} completed match(es) already`,
+        );
+      }
+      await tx.match.deleteMany({ where: { tournamentId } });
+      await tx.tournamentParticipant.updateMany({
+        where: { tournamentId },
+        data: { seed: null, groupLetter: null, groupRank: null },
+      });
+      await tx.tournament.update({
+        where: { id: tournamentId },
+        data: {
+          status: 'open',
+          format: null,
+          bracketShape: null,
+          groupSize: null,
+        },
+      });
+    });
+  }
+
+  /**
+   * Flip a `prepared` tournament into `in_progress`. Pure status change —
+   * the draw is already persisted by `prepare()`, so this is the moment
+   * organizers commit to that draw and start scheduling matches.
+   */
+  async start(tournamentId: string, actor: Actor): Promise<void> {
+    const t = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+    if (!t) throw new NotFoundException('Tournament not found');
+    this.assertCanModify(t, actor);
+    if (t.status !== 'prepared') {
+      throw new BadRequestException(
+        `can only start from prepared; got ${t.status}`,
+      );
+    }
+    await this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { status: 'in_progress' },
+    });
+  }
 }

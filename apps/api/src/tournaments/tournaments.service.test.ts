@@ -32,11 +32,14 @@ function mockPrisma(opts: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue(opts.participants ?? []),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     player: { findUnique: vi.fn() },
     match: {
       create: vi.fn().mockResolvedValue({}),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      count: vi.fn().mockResolvedValue(0),
     },
   };
   prisma.$transaction = vi.fn(async (fn: any) => fn(prisma));
@@ -525,3 +528,57 @@ function range(n: number) {
 function mockRatingTrigger() {
   return { trigger: vi.fn() };
 }
+
+describe('TournamentsService.rewind', () => {
+  it('rejects if tournament not in prepared state', async () => {
+    const p = mockPrisma({ tournament: { id:'t1', status: 'open', organizerId: 'u1' } });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.rewind('t1', { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/prepared/);
+  });
+
+  it('rejects if any match is already completed', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status: 'prepared', organizerId: 'u1' },
+    });
+    p.match.count.mockResolvedValue(1);
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.rewind('t1', { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/completed match/);
+  });
+
+  it('clears draw and returns to open', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status: 'prepared', organizerId: 'u1', format:'round_robin', bracketShape:{} },
+    });
+    p.match.count.mockResolvedValue(0);
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await svc.rewind('t1', { userId:'u1', role:'organizer' });
+    expect(p.match.deleteMany).toHaveBeenCalledWith({ where: { tournamentId:'t1' } });
+    expect(p.tournament.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'open', format: null, bracketShape: null, groupSize: null }),
+    }));
+    expect(p.tournamentParticipant.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { tournamentId:'t1' },
+      data: { seed: null, groupLetter: null, groupRank: null },
+    }));
+  });
+});
+
+describe('TournamentsService.start', () => {
+  it('rejects if tournament not in prepared state', async () => {
+    const p = mockPrisma({ tournament: { id:'t1', status: 'in_progress', organizerId: 'u1' } });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.start('t1', { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/prepared/);
+  });
+
+  it('flips status to in_progress', async () => {
+    const p = mockPrisma({ tournament: { id:'t1', status: 'prepared', organizerId: 'u1' } });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await svc.start('t1', { userId:'u1', role:'organizer' });
+    expect(p.tournament.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: 'in_progress' },
+    }));
+  });
+});
