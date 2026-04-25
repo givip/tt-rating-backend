@@ -239,6 +239,7 @@ describe('Tournaments E2E (Phase 2 smoke)', () => {
       id: 't-A',
       organizerId: 'org-A',
       processed: false,
+      status: 'open' as const,
       matchFormat: 'bo5' as const,
       participants: [
         { playerId: '11111111-1111-1111-1111-111111111111' },

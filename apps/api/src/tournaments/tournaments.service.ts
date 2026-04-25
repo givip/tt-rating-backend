@@ -163,6 +163,7 @@ export class TournamentsService {
         id: true,
         organizerId: true,
         processed: true,
+        status: true,
         matchFormat: true,
         participants: { select: { playerId: true } },
       },
@@ -173,6 +174,12 @@ export class TournamentsService {
     if (tournament.processed) {
       throw new BadRequestException(
         'Cannot add matches to a processed tournament',
+      );
+    }
+
+    if (tournament.status !== 'draft' && tournament.status !== 'open') {
+      throw new BadRequestException(
+        `cannot create matches manually in ${tournament.status}; only draft and open tournaments allow ad-hoc matches — use PATCH /matches/:id/result for prepared tournaments`,
       );
     }
 
@@ -246,6 +253,12 @@ export class TournamentsService {
 
     if (!tournament) throw new NotFoundException('Tournament not found');
     this.assertCanModify(tournament, actor);
+
+    if (tournament.status !== 'in_progress') {
+      throw new BadRequestException(
+        `can only finalize from in_progress; got ${tournament.status}`,
+      );
+    }
 
     if (tournament.processed) return { message: 'Tournament already processed' };
 

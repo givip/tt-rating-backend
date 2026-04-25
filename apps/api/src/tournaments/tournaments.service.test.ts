@@ -217,6 +217,7 @@ describe('TournamentsService', () => {
       id: 't1',
       organizerId: 'org-1',
       processed: false,
+      status: 'in_progress',
       _count: { participants: 6 },
     };
 
@@ -295,6 +296,7 @@ describe('TournamentsService', () => {
       id: 't1',
       organizerId: 'org-1',
       processed: false,
+      status: 'open' as const,
       matchFormat: 'bo5' as const,
       participants: [{ playerId: 'p1' }, { playerId: 'p2' }],
     };
@@ -715,6 +717,33 @@ describe('TournamentsService.getStandings', () => {
     expect(result.groups[0].rows.length).toBe(2);
     expect(result.groups[0].rows[0].playerId).toBe('p1');
     expect(result.groups[0].rows[0].wins).toBe(1);
+  });
+});
+
+describe('createMatch state-machine tightening', () => {
+  it('rejects in prepared state', async () => {
+    const p = mockPrisma({
+      tournament: {
+        id: 't1', status: 'prepared', organizerId: 'u1', processed: false,
+        matchFormat: 'bo5', participants: [{ playerId: 'p1' }, { playerId: 'p2' }],
+      },
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.createMatch('t1',
+      { round: 1, player1Id: 'p1', player2Id: 'p2' },
+      { userId: 'u1', role: 'organizer' }))
+      .rejects.toThrow(/draft.*open/);
+  });
+});
+
+describe('finalize state-machine tightening', () => {
+  it('rejects when not in_progress', async () => {
+    const p = mockPrisma({
+      tournament: { id: 't1', status: 'prepared', organizerId: 'u1', _count: { participants: 8 } },
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.finalize('t1', { userId: 'u1', role: 'organizer' }))
+      .rejects.toThrow(/in_progress/);
   });
 });
 
