@@ -11,6 +11,10 @@ import {
   type RatingJobTrigger,
 } from '../rating/rating-job-trigger.interface';
 import { MATCH_WEIGHTS } from '@tt-rating/core';
+import { distributeIntoGroups } from './draw/group-draw';
+import { generateRoundRobinPairings } from './draw/round-robin';
+import { buildPlacementBrackets } from './draw/bracket-shape';
+import { seedParticipants } from './draw/seeding';
 
 /**
  * The authenticated caller, as attached to the request by `JwtAuthGuard`.
@@ -253,5 +257,141 @@ export class TournamentsService {
     await this.ratingJob.trigger({ tournamentId });
 
     return { message: 'Tournament finalized — rating calculation queued' };
+  }
+
+  /**
+   * Transition a tournament from `open` to `prepared` by running the chosen
+   * draw and persisting all of: format selection, seeded participants, group
+   * letters (if any), generated `Match` rows, and the playoff `bracketShape`.
+   *
+   * v1 supports only `round_robin` and `groups_playoff`. Everything happens
+   * inside a single Prisma transaction — we don't want to leave a half-drawn
+   * tournament behind if the rating-of-an-individual update fails partway.
+   */
+  async prepare(
+    tournamentId: string,
+    body: {
+      format: 'round_robin' | 'groups_playoff' | 'single_elim' | 'swiss';
+      matchFormat?: 'bo3' | 'bo5' | 'bo7';
+      groupSize?: 3 | 4 | 5;
+      hasThirdPlaceMatch?: boolean;
+      seedOverrides?: Record<string, number>;
+    },
+    actor: Actor,
+  ): Promise<void> {
+    if (body.format !== 'round_robin' && body.format !== 'groups_playoff') {
+      throw new BadRequestException(`unsupported format in v1: ${body.format}`);
+    }
+    if (body.format === 'round_robin' && body.groupSize != null) {
+      throw new BadRequestException('groupSize is not valid for round_robin');
+    }
+    const groupSize = body.groupSize ?? 4;
+
+    await this.prisma.$transaction(async (tx: any) => {
+      const t = await tx.tournament.findUnique({ where: { id: tournamentId } });
+      if (!t) throw new NotFoundException('Tournament not found');
+      this.assertCanModify(t, actor);
+      if (t.status !== 'open') {
+        throw new BadRequestException(
+          `tournament must be in open state to prepare; got ${t.status}`,
+        );
+      }
+
+      const participants = await tx.tournamentParticipant.findMany({
+        where: { tournamentId, withdrawnAt: null },
+        include: { player: { select: { internalRating: true } } },
+      });
+      const N = participants.length;
+      if (N < 4) throw new BadRequestException('at least 4 participants required');
+      if (body.format === 'groups_playoff' && N < 2 * groupSize) {
+        throw new BadRequestException(
+          `groups_playoff requires at least ${2 * groupSize} participants; got ${N}`,
+        );
+      }
+
+      // 1. Seed by rating, applying any organizer-supplied overrides.
+      const seeded = seedParticipants(
+        participants.map((p: any) => ({
+          playerId: p.playerId,
+          internalRating: p.player.internalRating,
+        })),
+        body.seedOverrides,
+      );
+
+      // 2. Format-specific draw.
+      let matchRows: any[] = [];
+      let bracketShape: any = null;
+      let groupSizeWritten: number | null = null;
+
+      if (body.format === 'round_robin') {
+        const pairings = generateRoundRobinPairings(seeded.map((p) => p.playerId));
+        matchRows = pairings.map((p) => ({
+          tournamentId,
+          round: p.round,
+          player1Id: p.player1Id,
+          player2Id: p.player2Id,
+          groupLetter: null,
+          bracketLabel: null,
+          status: 'scheduled',
+          matchType: 'tournament',
+          matchWeight: 1.0,
+        }));
+        for (const sp of seeded) {
+          await tx.tournamentParticipant.update({
+            where: { tournamentId_playerId: { tournamentId, playerId: sp.playerId } },
+            data: { seed: sp.seed },
+          });
+        }
+      } else {
+        groupSizeWritten = groupSize;
+        const seededWithRating = seeded.map((s) => {
+          const orig = participants.find((p: any) => p.playerId === s.playerId)!;
+          return {
+            playerId: s.playerId,
+            seed: s.seed,
+            internalRating: orig.player.internalRating,
+          };
+        });
+        const groups = distributeIntoGroups(seededWithRating, groupSize);
+        for (const g of groups) {
+          const pairings = generateRoundRobinPairings(g.players.map((p) => p.playerId));
+          for (const p of pairings) {
+            matchRows.push({
+              tournamentId,
+              round: p.round,
+              player1Id: p.player1Id,
+              player2Id: p.player2Id,
+              groupLetter: g.letter,
+              bracketLabel: null,
+              status: 'scheduled',
+              matchType: 'tournament',
+              matchWeight: 1.0,
+            });
+          }
+          for (const sp of g.players) {
+            await tx.tournamentParticipant.update({
+              where: { tournamentId_playerId: { tournamentId, playerId: sp.playerId } },
+              data: { seed: sp.seed, groupLetter: g.letter },
+            });
+          }
+        }
+        bracketShape = buildPlacementBrackets(groups.length, groupSize);
+      }
+
+      if (matchRows.length > 0) {
+        await tx.match.createMany({ data: matchRows });
+      }
+      await tx.tournament.update({
+        where: { id: tournamentId },
+        data: {
+          format: body.format,
+          matchFormat: body.matchFormat ?? 'bo5',
+          groupSize: groupSizeWritten,
+          bracketShape: bracketShape as any,
+          hasThirdPlaceMatch: body.hasThirdPlaceMatch ?? false,
+          status: 'prepared',
+        },
+      });
+    });
   }
 }

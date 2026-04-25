@@ -10,29 +10,49 @@ const organizerActor = { userId: 'org-1', role: 'organizer' as const };
 const otherOrganizerActor = { userId: 'org-2', role: 'organizer' as const };
 const adminActor = { userId: 'admin-1', role: 'admin' as const };
 
-const mockPrisma = {
-  tournament: {
-    create: vi.fn(),
-    findUnique: vi.fn(),
-    findMany: vi.fn(),
-    update: vi.fn(),
-  },
-  tournamentParticipant: {
-    create: vi.fn(),
-    findMany: vi.fn(),
-  },
-  player: { findUnique: vi.fn() },
-  match: { create: vi.fn() },
-};
-
-const mockRatingJob = { trigger: vi.fn() };
+/**
+ * Build a fresh prisma mock for a test. Configure with:
+ *   - `tournament`: object returned from `tournament.findUnique`. Defaults to null.
+ *   - `participants`: array returned from `tournamentParticipant.findMany`. Defaults to [].
+ * All write methods (create/update/createMany) are vi.fn() returning empty results.
+ * `$transaction(fn)` runs `fn(self)` so the same mock acts as the tx client too.
+ */
+function mockPrisma(opts: {
+  tournament?: any;
+  participants?: any[];
+} = {}) {
+  const prisma: any = {
+    tournament: {
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(opts.tournament ?? null),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    tournamentParticipant: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue(opts.participants ?? []),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    player: { findUnique: vi.fn() },
+    match: {
+      create: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+  prisma.$transaction = vi.fn(async (fn: any) => fn(prisma));
+  return prisma;
+}
 
 describe('TournamentsService', () => {
   let service: TournamentsService;
+  let prisma: ReturnType<typeof mockPrisma>;
+  let mockRatingJob: { trigger: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    service = new TournamentsService(mockPrisma as any, mockRatingJob as any);
+    prisma = mockPrisma();
+    mockRatingJob = { trigger: vi.fn() };
+    service = new TournamentsService(prisma as any, mockRatingJob as any);
   });
 
   describe('validateParticipantCount', () => {
@@ -77,49 +97,49 @@ describe('TournamentsService', () => {
     };
 
     it('throws NotFoundException when tournament not found', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(null);
+      prisma.tournament.findUnique.mockResolvedValue(null);
       await expect(
         service.addParticipant('t-nope', 'p1', organizerActor),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('throws ForbiddenException when a different organizer tries to add', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
+      prisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
       await expect(
         service.addParticipant('t1', 'p1', otherOrganizerActor),
       ).rejects.toThrow(ForbiddenException);
-      expect(mockPrisma.tournamentParticipant.create).not.toHaveBeenCalled();
+      expect(prisma.tournamentParticipant.create).not.toHaveBeenCalled();
     });
 
     it('admin can add to any tournament', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
-      mockPrisma.player.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
+      prisma.player.findUnique.mockResolvedValue({
         id: 'p1', internalRating: 1650, rd: 120,
       });
-      mockPrisma.tournamentParticipant.create.mockResolvedValue({});
+      prisma.tournamentParticipant.create.mockResolvedValue({});
 
       await service.addParticipant('t1', 'p1', adminActor);
-      expect(mockPrisma.tournamentParticipant.create).toHaveBeenCalled();
+      expect(prisma.tournamentParticipant.create).toHaveBeenCalled();
     });
 
     it('throws NotFoundException when player not found', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
-      mockPrisma.player.findUnique.mockResolvedValue(null);
+      prisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
+      prisma.player.findUnique.mockResolvedValue(null);
       await expect(
         service.addParticipant('t1', 'p-nonexistent', organizerActor),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('creates participant with snapshotted rating', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
-      mockPrisma.player.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
+      prisma.player.findUnique.mockResolvedValue({
         id: 'p1', internalRating: 1650, rd: 120,
       });
-      mockPrisma.tournamentParticipant.create.mockResolvedValue({ tournamentId: 't1', playerId: 'p1' });
+      prisma.tournamentParticipant.create.mockResolvedValue({ tournamentId: 't1', playerId: 'p1' });
 
       await service.addParticipant('t1', 'p1', organizerActor);
 
-      expect(mockPrisma.tournamentParticipant.create).toHaveBeenCalledWith({
+      expect(prisma.tournamentParticipant.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           tournamentId: 't1',
           playerId: 'p1',
@@ -130,55 +150,55 @@ describe('TournamentsService', () => {
     });
 
     it('rejects a player below tournament.minRating', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue({
         ...tournamentOwnedByOrg1, minRating: 1800, maxRating: null,
       });
-      mockPrisma.player.findUnique.mockResolvedValue({
+      prisma.player.findUnique.mockResolvedValue({
         id: 'p1', internalRating: 1650, rd: 120,
       });
 
       await expect(
         service.addParticipant('t1', 'p1', organizerActor),
       ).rejects.toThrow(/below min rating/i);
-      expect(mockPrisma.tournamentParticipant.create).not.toHaveBeenCalled();
+      expect(prisma.tournamentParticipant.create).not.toHaveBeenCalled();
     });
 
     it('rejects a player above tournament.maxRating', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue({
         ...tournamentOwnedByOrg1, minRating: null, maxRating: 1500,
       });
-      mockPrisma.player.findUnique.mockResolvedValue({
+      prisma.player.findUnique.mockResolvedValue({
         id: 'p1', internalRating: 1650, rd: 120,
       });
 
       await expect(
         service.addParticipant('t1', 'p1', organizerActor),
       ).rejects.toThrow(/above max rating/i);
-      expect(mockPrisma.tournamentParticipant.create).not.toHaveBeenCalled();
+      expect(prisma.tournamentParticipant.create).not.toHaveBeenCalled();
     });
 
     it('null minRating and maxRating pass through (no constraint)', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
-      mockPrisma.player.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue(tournamentOwnedByOrg1);
+      prisma.player.findUnique.mockResolvedValue({
         id: 'p1', internalRating: 50, rd: 120,  // extreme low
       });
-      mockPrisma.tournamentParticipant.create.mockResolvedValue({});
+      prisma.tournamentParticipant.create.mockResolvedValue({});
 
       await service.addParticipant('t1', 'p1', organizerActor);
-      expect(mockPrisma.tournamentParticipant.create).toHaveBeenCalled();
+      expect(prisma.tournamentParticipant.create).toHaveBeenCalled();
     });
 
     it('allows a player exactly at minRating (inclusive)', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue({
         ...tournamentOwnedByOrg1, minRating: 1650, maxRating: null,
       });
-      mockPrisma.player.findUnique.mockResolvedValue({
+      prisma.player.findUnique.mockResolvedValue({
         id: 'p1', internalRating: 1650, rd: 120,
       });
-      mockPrisma.tournamentParticipant.create.mockResolvedValue({});
+      prisma.tournamentParticipant.create.mockResolvedValue({});
 
       await service.addParticipant('t1', 'p1', organizerActor);
-      expect(mockPrisma.tournamentParticipant.create).toHaveBeenCalled();
+      expect(prisma.tournamentParticipant.create).toHaveBeenCalled();
     });
   });
 
@@ -191,14 +211,14 @@ describe('TournamentsService', () => {
     };
 
     it('throws NotFoundException when tournament not found', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(null);
+      prisma.tournament.findUnique.mockResolvedValue(null);
       await expect(service.finalize('t-nonexistent', organizerActor)).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('throws ForbiddenException when a different organizer finalizes', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(service.finalize('t1', otherOrganizerActor)).rejects.toThrow(
         ForbiddenException,
       );
@@ -206,8 +226,8 @@ describe('TournamentsService', () => {
     });
 
     it('admin can finalize any tournament', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
-      mockPrisma.tournament.update.mockResolvedValue({});
+      prisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.update.mockResolvedValue({});
       mockRatingJob.trigger.mockResolvedValue(undefined);
 
       await service.finalize('t1', adminActor);
@@ -215,7 +235,7 @@ describe('TournamentsService', () => {
     });
 
     it('returns early if already processed', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue({
         ...base, processed: true, _count: { participants: 8 },
       });
       const result = await service.finalize('t1', organizerActor);
@@ -224,7 +244,7 @@ describe('TournamentsService', () => {
     });
 
     it('throws BadRequestException if fewer than 4 participants', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue({
+      prisma.tournament.findUnique.mockResolvedValue({
         ...base, _count: { participants: 3 },
       });
       await expect(service.finalize('t1', organizerActor)).rejects.toThrow(
@@ -233,13 +253,13 @@ describe('TournamentsService', () => {
     });
 
     it('sets status to completed and triggers rating job', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
-      mockPrisma.tournament.update.mockResolvedValue({});
+      prisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.update.mockResolvedValue({});
       mockRatingJob.trigger.mockResolvedValue(undefined);
 
       const result = await service.finalize('t1', organizerActor);
 
-      expect(mockPrisma.tournament.update).toHaveBeenCalledWith({
+      expect(prisma.tournament.update).toHaveBeenCalledWith({
         where: { id: 't1' },
         data: { status: 'completed' },
       });
@@ -250,9 +270,9 @@ describe('TournamentsService', () => {
 
   describe('create', () => {
     it('uses actor.userId as organizerId', async () => {
-      mockPrisma.tournament.create.mockResolvedValue({ id: 't-new' });
+      prisma.tournament.create.mockResolvedValue({ id: 't-new' });
       await service.create(organizerActor, { title: 'Foo' });
-      expect(mockPrisma.tournament.create).toHaveBeenCalledWith({
+      expect(prisma.tournament.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ organizerId: 'org-1', title: 'Foo' }),
       });
     });
@@ -279,37 +299,37 @@ describe('TournamentsService', () => {
     };
 
     it('throws NotFoundException when tournament is missing', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(null);
+      prisma.tournament.findUnique.mockResolvedValue(null);
       await expect(
         service.createMatch('t-missing', validInput, organizerActor),
       ).rejects.toThrow(NotFoundException);
-      expect(mockPrisma.match.create).not.toHaveBeenCalled();
+      expect(prisma.match.create).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException when caller is not the organizer', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(
         service.createMatch('t1', validInput, otherOrganizerActor),
       ).rejects.toThrow(ForbiddenException);
-      expect(mockPrisma.match.create).not.toHaveBeenCalled();
+      expect(prisma.match.create).not.toHaveBeenCalled();
     });
 
     it('admin can create matches in any tournament', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
-      mockPrisma.match.create.mockResolvedValue({ id: 'm-new' });
+      prisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.match.create.mockResolvedValue({ id: 'm-new' });
       await service.createMatch('t1', validInput, adminActor);
-      expect(mockPrisma.match.create).toHaveBeenCalled();
+      expect(prisma.match.create).toHaveBeenCalled();
     });
 
     it('throws BadRequestException when tournament is already processed', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue({ ...base, processed: true });
+      prisma.tournament.findUnique.mockResolvedValue({ ...base, processed: true });
       await expect(
         service.createMatch('t1', validInput, organizerActor),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when player1Id equals player2Id', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(
         service.createMatch(
           't1',
@@ -320,7 +340,7 @@ describe('TournamentsService', () => {
     });
 
     it('throws BadRequestException when a player is not a participant', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(
         service.createMatch(
           't1',
@@ -331,7 +351,7 @@ describe('TournamentsService', () => {
     });
 
     it('throws BadRequestException when winnerId is not one of the players', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(
         service.createMatch(
           't1',
@@ -342,7 +362,7 @@ describe('TournamentsService', () => {
     });
 
     it('throws BadRequestException when only one set count is provided', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(
         service.createMatch(
           't1',
@@ -353,7 +373,7 @@ describe('TournamentsService', () => {
     });
 
     it("throws BadRequestException when winner's set count is not greater than loser's", async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.tournament.findUnique.mockResolvedValue(base);
       await expect(
         service.createMatch(
           't1',
@@ -364,8 +384,8 @@ describe('TournamentsService', () => {
     });
 
     it('creates a match with matchWeight derived from the tournament format', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
-      mockPrisma.match.create.mockResolvedValue({ id: 'm-new' });
+      prisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.match.create.mockResolvedValue({ id: 'm-new' });
 
       await service.createMatch(
         't1',
@@ -373,7 +393,7 @@ describe('TournamentsService', () => {
         organizerActor,
       );
 
-      expect(mockPrisma.match.create).toHaveBeenCalledWith({
+      expect(prisma.match.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           tournamentId: 't1',
           player1Id: 'p1',
@@ -389,8 +409,8 @@ describe('TournamentsService', () => {
     });
 
     it('allows creating a scheduled match without sets or winner', async () => {
-      mockPrisma.tournament.findUnique.mockResolvedValue(base);
-      mockPrisma.match.create.mockResolvedValue({ id: 'm-new' });
+      prisma.tournament.findUnique.mockResolvedValue(base);
+      prisma.match.create.mockResolvedValue({ id: 'm-new' });
 
       await service.createMatch(
         't1',
@@ -398,7 +418,7 @@ describe('TournamentsService', () => {
         organizerActor,
       );
 
-      expect(mockPrisma.match.create).toHaveBeenCalledWith({
+      expect(prisma.match.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           tournamentId: 't1',
           player1Id: 'p1',
@@ -413,3 +433,95 @@ describe('TournamentsService', () => {
     });
   });
 });
+
+describe('TournamentsService.prepare', () => {
+  it('rejects if tournament not in open state', async () => {
+    const prisma = mockPrisma({
+      tournament: { id: 't1', status: 'draft', organizerId: 'u1', participantsCount: 8 },
+    });
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await expect(
+      svc.prepare('t1', { format: 'round_robin' }, { userId: 'u1', role: 'organizer' }),
+    ).rejects.toThrow(/must be in open/);
+  });
+
+  it('rejects format = single_elim with "unsupported format in v1"', async () => {
+    const prisma = mockPrisma({
+      tournament: { id: 't1', status: 'open', organizerId: 'u1', participantsCount: 8 },
+      participants: range(8),
+    });
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await expect(
+      svc.prepare('t1', { format: 'single_elim' as any }, { userId: 'u1', role: 'organizer' }),
+    ).rejects.toThrow(/unsupported format/);
+  });
+
+  it('rejects groups_playoff if N < 2 * groupSize', async () => {
+    const prisma = mockPrisma({
+      tournament: { id: 't1', status: 'open', organizerId: 'u1', participantsCount: 6 },
+      participants: range(6),
+    });
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await expect(
+      svc.prepare(
+        't1',
+        { format: 'groups_playoff', groupSize: 4 },
+        { userId: 'u1', role: 'organizer' },
+      ),
+    ).rejects.toThrow(/at least 8 participants/);
+  });
+
+  it('round-robin: writes all C(N,2) matches and flips status to prepared', async () => {
+    const prisma = mockPrisma({
+      tournament: { id: 't1', status: 'open', organizerId: 'u1', participantsCount: 4 },
+      participants: range(4),
+    });
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await svc.prepare('t1', { format: 'round_robin' }, { userId: 'u1', role: 'organizer' });
+    expect(prisma.match.createMany).toHaveBeenCalled();
+    const created = prisma.match.createMany.mock.calls[0][0].data;
+    expect(created.length).toBe(6);
+    expect(prisma.tournament.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 't1' },
+        data: expect.objectContaining({ status: 'prepared', format: 'round_robin' }),
+      }),
+    );
+  });
+
+  it('groups_playoff: writes group matches + bracketShape, sets groupLetter on participants', async () => {
+    const prisma = mockPrisma({
+      tournament: { id: 't1', status: 'open', organizerId: 'u1', participantsCount: 8 },
+      participants: range(8),
+    });
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await svc.prepare(
+      't1',
+      { format: 'groups_playoff', groupSize: 4 },
+      { userId: 'u1', role: 'organizer' },
+    );
+    const created = prisma.match.createMany.mock.calls[0][0].data;
+    expect(created.length).toBe(12);
+    expect(created.every((m: any) => m.groupLetter !== null && m.bracketLabel === null)).toBe(true);
+    const update = prisma.tournament.update.mock.calls[0][0];
+    expect(update.data.bracketShape.subBrackets.length).toBe(4);
+    expect(update.data.groupSize).toBe(4);
+  });
+});
+
+function range(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    tournamentId: 't1',
+    playerId: `p${i + 1}`,
+    player: { internalRating: 2000 - i * 50 },
+    seed: null,
+    groupLetter: null,
+    groupRank: null,
+    finalPosition: null,
+    withdrawnAt: null,
+  }));
+}
+
+function mockRatingTrigger() {
+  return { trigger: vi.fn() };
+}
