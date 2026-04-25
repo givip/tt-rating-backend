@@ -30,9 +30,11 @@ function mockPrisma(opts: {
     },
     tournamentParticipant: {
       create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue(opts.participants ?? []),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      delete: vi.fn().mockResolvedValue({}),
     },
     player: { findUnique: vi.fn() },
     match: {
@@ -580,5 +582,62 @@ describe('TournamentsService.start', () => {
     expect(p.tournament.update).toHaveBeenCalledWith(expect.objectContaining({
       data: { status: 'in_progress' },
     }));
+  });
+});
+
+describe('TournamentsService.dropParticipant', () => {
+  it('hard-deletes in draft state', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'draft', organizerId:'u1' },
+    });
+    p.tournamentParticipant.findUnique.mockResolvedValue({
+      tournamentId:'t1', playerId:'p1', withdrawnAt:null,
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await svc.dropParticipant('t1', 'p1', { userId:'u1', role:'organizer' });
+    expect(p.tournamentParticipant.delete).toHaveBeenCalledWith({
+      where: { tournamentId_playerId: { tournamentId:'t1', playerId:'p1' } },
+    });
+  });
+
+  it('hard-deletes in open state', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'open', organizerId:'u1' },
+    });
+    p.tournamentParticipant.findUnique.mockResolvedValue({
+      tournamentId:'t1', playerId:'p1', withdrawnAt:null,
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await svc.dropParticipant('t1', 'p1', { userId:'u1', role:'organizer' });
+    expect(p.tournamentParticipant.delete).toHaveBeenCalled();
+  });
+
+  it('soft-deletes in prepared state and removes scheduled matches involving the player', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'prepared', organizerId:'u1' },
+    });
+    p.tournamentParticipant.findUnique.mockResolvedValue({
+      tournamentId:'t1', playerId:'p1', withdrawnAt:null, groupLetter:'A',
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await svc.dropParticipant('t1', 'p1', { userId:'u1', role:'organizer' });
+    expect(p.tournamentParticipant.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ withdrawnAt: expect.any(Date) }),
+    }));
+    expect(p.match.deleteMany).toHaveBeenCalledWith({
+      where: { tournamentId:'t1', status:'scheduled', OR: [{player1Id:'p1'},{player2Id:'p1'}] },
+    });
+  });
+
+  it('rejects in in_progress state', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', organizerId:'u1' },
+    });
+    p.tournamentParticipant.findUnique.mockResolvedValue({
+      tournamentId:'t1', playerId:'p1', withdrawnAt:null,
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.dropParticipant('t1', 'p1', { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/cannot drop/);
   });
 });

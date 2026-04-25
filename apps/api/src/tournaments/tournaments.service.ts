@@ -437,6 +437,58 @@ export class TournamentsService {
   }
 
   /**
+   * Drop a participant from a tournament. The behaviour depends on state:
+   * in `draft`/`open` we hard-delete the row (no draw exists yet, so there's
+   * nothing to reconcile); in `prepared` we soft-delete via `withdrawnAt`
+   * and purge the `scheduled` matches that name them so the bracket stays
+   * consistent. Once the tournament has actually started, dropping is
+   * forbidden — losing a player mid-event has rating consequences that
+   * belong to a future "forfeit" flow rather than a silent removal.
+   */
+  async dropParticipant(
+    tournamentId: string,
+    playerId: string,
+    actor: Actor,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx: any) => {
+      const t = await tx.tournament.findUnique({ where: { id: tournamentId } });
+      if (!t) throw new NotFoundException('Tournament not found');
+      this.assertCanModify(t, actor);
+
+      const p = await tx.tournamentParticipant.findUnique({
+        where: { tournamentId_playerId: { tournamentId, playerId } },
+      });
+      if (!p || p.withdrawnAt != null) {
+        throw new NotFoundException('Participant not found in this tournament');
+      }
+
+      if (t.status === 'draft' || t.status === 'open') {
+        await tx.tournamentParticipant.delete({
+          where: { tournamentId_playerId: { tournamentId, playerId } },
+        });
+        return;
+      }
+      if (t.status === 'prepared') {
+        await tx.tournamentParticipant.update({
+          where: { tournamentId_playerId: { tournamentId, playerId } },
+          data: { withdrawnAt: new Date() },
+        });
+        await tx.match.deleteMany({
+          where: {
+            tournamentId,
+            status: 'scheduled',
+            OR: [{ player1Id: playerId }, { player2Id: playerId }],
+          },
+        });
+        return;
+      }
+      throw new BadRequestException(
+        `cannot drop participant in ${t.status} state`,
+      );
+    });
+  }
+
+  /**
    * Flip a `prepared` tournament into `in_progress`. Pure status change —
    * the draw is already persisted by `prepare()`, so this is the moment
    * organizers commit to that draw and start scheduling matches.
