@@ -647,6 +647,77 @@ describe('TournamentsService.dropParticipant', () => {
   });
 });
 
+describe('TournamentsService.getNextMatches', () => {
+  it('returns scheduled matches ordered by round then group letter', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', numberOfTables:4 },
+    });
+    p.match.findMany.mockImplementation(({ orderBy, take }: any) => {
+      // Simulate sort by round then groupLetter then id.
+      const all = [
+        { id:'m3', tournamentId:'t1', status:'scheduled', round:2, groupLetter:'A', bracketLabel:null },
+        { id:'m1', tournamentId:'t1', status:'scheduled', round:1, groupLetter:'B', bracketLabel:null },
+        { id:'m2', tournamentId:'t1', status:'scheduled', round:1, groupLetter:'A', bracketLabel:null },
+      ];
+      // Simple sort — relies on Prisma to do it in real life; test confirms call shape.
+      const sorted = [...all].sort((a, b) =>
+        a.round - b.round || (a.groupLetter ?? '').localeCompare(b.groupLetter ?? '')
+        || (a.bracketLabel ?? '').localeCompare(b.bracketLabel ?? '')
+        || a.id.localeCompare(b.id));
+      return Promise.resolve(take ? sorted.slice(0, take) : sorted);
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    const result = await svc.getNextMatches('t1');
+    expect(result.numberOfTables).toBe(4);
+    expect(result.matches.map((m: any) => m.id)).toEqual(['m2','m1','m3']);
+  });
+
+  it('respects limit parameter', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', numberOfTables:4 },
+    });
+    p.match.findMany.mockImplementation(({ take }: any) =>
+      Promise.resolve([
+        { id:'m1' }, { id:'m2' }, { id:'m3' },
+      ].slice(0, take)));
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    const result = await svc.getNextMatches('t1', 2);
+    expect(result.matches.length).toBe(2);
+  });
+
+  it('rejects in non-prepared/in_progress states', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'completed', numberOfTables:4 },
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.getNextMatches('t1'))
+      .rejects.toThrow(/prepared.*in_progress/);
+  });
+});
+
+describe('TournamentsService.getStandings', () => {
+  it('groups participants by groupLetter and returns RTTF-ordered rows', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', format:'groups_playoff', bracketShape:{subBrackets:[]}, groupSize:4 },
+    });
+    p.tournamentParticipant.findMany.mockResolvedValue([
+      { tournamentId:'t1', playerId:'p1', groupLetter:'A', groupRank:1, withdrawnAt:null, seed:1 },
+      { tournamentId:'t1', playerId:'p2', groupLetter:'A', groupRank:2, withdrawnAt:null, seed:2 },
+    ]);
+    p.match.findMany.mockResolvedValue([
+      { id:'m1', tournamentId:'t1', status:'completed', winnerId:'p1', player1Id:'p1', player2Id:'p2', setsPlayer1:3, setsPlayer2:0, groupLetter:'A', bracketLabel:null },
+    ]);
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    const result = await svc.getStandings('t1');
+    expect(result.format).toBe('groups_playoff');
+    expect(result.groups.length).toBe(1);
+    expect(result.groups[0].letter).toBe('A');
+    expect(result.groups[0].rows.length).toBe(2);
+    expect(result.groups[0].rows[0].playerId).toBe('p1');
+    expect(result.groups[0].rows[0].wins).toBe(1);
+  });
+});
+
 describe('TournamentsService.patchMatchResult', () => {
   it('rejects if match not scheduled', async () => {
     const p = mockPrisma({

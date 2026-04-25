@@ -16,6 +16,7 @@ import { generateRoundRobinPairings } from './draw/round-robin';
 import { buildPlacementBrackets } from './draw/bracket-shape';
 import { seedParticipants } from './draw/seeding';
 import { advanceBracket } from './draw/advance';
+import { computeGroupStandings } from './draw/tiebreakers';
 
 /**
  * The authenticated caller, as attached to the request by `JwtAuthGuard`.
@@ -566,6 +567,98 @@ export class TournamentsService {
 
       await advanceBracket(tournamentId, matchId, tx);
     });
+  }
+
+  async getNextMatches(
+    tournamentId: string,
+    limit?: number,
+  ): Promise<{ numberOfTables: number; matches: any[] }> {
+    const t = await this.prisma.tournament.findUnique({ where: { id: tournamentId } });
+    if (!t) throw new NotFoundException('Tournament not found');
+    if (t.status !== 'prepared' && t.status !== 'in_progress') {
+      throw new BadRequestException(
+        `next-matches available only in prepared or in_progress; got ${t.status}`,
+      );
+    }
+    const cap = limit ?? t.numberOfTables;
+    const matches = await this.prisma.match.findMany({
+      where: { tournamentId, status: 'scheduled' },
+      orderBy: [
+        { round: 'asc' },
+        { groupLetter: 'asc' },
+        { bracketLabel: 'asc' },
+        { id: 'asc' },
+      ],
+      take: cap,
+    });
+    return { numberOfTables: t.numberOfTables, matches };
+  }
+
+  async getStandings(tournamentId: string): Promise<{
+    format: string | null;
+    groups: Array<{ letter: string; rows: any[] }>;
+    brackets: Array<{ label: string; matches: any[]; finalPositions?: Record<string, number> }>;
+  }> {
+    const t = await this.prisma.tournament.findUnique({ where: { id: tournamentId } });
+    if (!t) throw new NotFoundException('Tournament not found');
+    if (t.status === 'draft' || t.status === 'open') {
+      throw new BadRequestException(`standings unavailable in ${t.status}`);
+    }
+    const participants = await this.prisma.tournamentParticipant.findMany({
+      where: { tournamentId, withdrawnAt: null },
+    });
+    const matches = await this.prisma.match.findMany({ where: { tournamentId } });
+
+    const groupLetters = [...new Set(
+      participants.map((p: any) => p.groupLetter).filter((x: any): x is string => x != null),
+    )].sort();
+    const groups = groupLetters.map(letter => {
+      const groupParticipants = participants.filter((p: any) => p.groupLetter === letter);
+      const groupMatches = matches.filter((m: any) => m.groupLetter === letter && m.status === 'completed');
+      const standings = computeGroupStandings(
+        groupMatches.map((m: any) => ({
+          player1Id: m.player1Id, player2Id: m.player2Id,
+          winnerId: m.winnerId!,
+          setsPlayer1: m.setsPlayer1!, setsPlayer2: m.setsPlayer2!,
+        })),
+        groupParticipants.map((p: any) => ({ playerId: p.playerId })),
+      );
+      const seedById = new Map(groupParticipants.map((p: any) => [p.playerId, p.seed]));
+      return {
+        letter,
+        rows: standings.map(s => ({
+          ...s,
+          seed: seedById.get(s.playerId) ?? null,
+        })),
+      };
+    });
+
+    // Round-robin (no groupLetter): single "" group containing everyone.
+    if (groups.length === 0 && participants.length > 0) {
+      const standings = computeGroupStandings(
+        matches.filter((m: any) => m.status === 'completed').map((m: any) => ({
+          player1Id: m.player1Id, player2Id: m.player2Id,
+          winnerId: m.winnerId!,
+          setsPlayer1: m.setsPlayer1!, setsPlayer2: m.setsPlayer2!,
+        })),
+        participants.map((p: any) => ({ playerId: p.playerId })),
+      );
+      const seedById = new Map(participants.map((p: any) => [p.playerId, p.seed]));
+      groups.push({
+        letter: '',
+        rows: standings.map(s => ({ ...s, seed: seedById.get(s.playerId) ?? null })),
+      });
+    }
+
+    const bracketLabels = [...new Set(
+      matches.map((m: any) => m.bracketLabel).filter((x: any): x is string => x != null),
+    )].sort();
+    const brackets = bracketLabels.map(label => ({
+      label,
+      matches: matches.filter((m: any) => m.bracketLabel === label),
+    }));
+
+    return { format: t.format, groups, brackets };
   }
 
   async start(tournamentId: string, actor: Actor): Promise<void> {
