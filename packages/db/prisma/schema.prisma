@@ -53,6 +53,7 @@ enum TournamentCategory {
 enum TournamentStatus {
   draft
   open
+  prepared
   in_progress
   completed
   cancelled
@@ -204,7 +205,10 @@ model Tournament {
   city                 String
   startsAt             DateTime           @map("starts_at")
   endsAt               DateTime?          @map("ends_at")
-  format               TournamentFormat
+  format               TournamentFormat?
+  numberOfTables       Int                @default(1) @map("number_of_tables")
+  groupSize            Int?               @map("group_size")
+  bracketShape         Json?              @map("bracket_shape")
   matchFormat          MatchFormat        @default(bo5)
   hasThirdPlaceMatch   Boolean            @default(false) @map("has_third_place_match")
   category             TournamentCategory @default(open)
@@ -240,6 +244,9 @@ model TournamentParticipant {
   ratingAfter        Float?   @map("rating_after")
   rdAfter            Float?   @map("rd_after")
   ratingDeltaDisplay Int?     @map("rating_delta_display")
+  groupLetter        String?  @map("group_letter")
+  groupRank          Int?     @map("group_rank")
+  withdrawnAt        DateTime? @map("withdrawn_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   tournament Tournament @relation(fields: [tournamentId], references: [id])
@@ -267,6 +274,8 @@ model Match {
   expiresAt    DateTime?   @map("expires_at")
   enteredBy    String?     @map("entered_by")
   status       MatchStatus @default(scheduled)
+  groupLetter  String?     @map("group_letter")
+  bracketLabel String?     @map("bracket_label")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
   tournament    Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Restrict)
@@ -277,6 +286,7 @@ model Match {
   @@index([player2Id])
   @@index([player1Id, matchType, status])
   @@index([player2Id, matchType, status])
+  @@index([tournamentId, status, round])
   @@map("matches")
 }
 
