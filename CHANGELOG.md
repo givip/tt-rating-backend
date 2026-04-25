@@ -6,6 +6,18 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 
 ## [Unreleased]
 
+### Changed — schema tidy-up (2026-04-24)
+
+- Dropped dead provenance columns from `players`: `rating_source`, `source_rating`, `source_url`, `import_date`. The `RatingSource` enum is removed entirely. The import seeded `internal_rating` once; nothing else read these columns.
+- Added `updated_at DateTime @updatedAt` to `users`, `players`, `clubs`, `tournaments`, `tournament_participants`, `matches`, `rating_changes`. Prisma maintains the column on every update — no application code changes needed. Audit-only tables (`rating_snapshots`, `auth_otps`, `login_attempts`, `refresh_tokens`) intentionally skipped; `rating_config` already had one.
+- Added `phone_verified_at DateTime?` and `email_verified_at DateTime?` to `users`. Nullable timestamps double as "is verified" + audit trail. No backfill — pre-existing users stay `NULL` until they re-verify.
+- Added `address String?` and `phone String?` to `clubs`.
+- Migration hand-edit: `DEFAULT CURRENT_TIMESTAMP` was added to each new `updated_at NOT NULL` column so the ALTER backfills existing rows safely. `@updatedAt` continues to drive the column at the ORM layer; the DB default is a belt-and-braces for raw-SQL writes.
+
+### Breaking
+
+- `AdminService.parseCsvRow` no longer accepts a `source` column in the CSV. Importers must drop the column from their feeds. No migration path — the column was schema-layer-only.
+
 ### Added — Pluggable auth (Phase 1)
 
 - `AuthStrategy` interface (`apps/api/src/auth/strategies/auth-strategy.interface.ts`) — strategies implement `name`, optional `initiate` (for multi-step flows like OTP), and `complete` (returns `{ userId, role }` or throws `UnauthorizedException`).
