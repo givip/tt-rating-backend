@@ -6,6 +6,28 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 
 ## [Unreleased]
 
+### Added — Tournament management v1 (2026-04-25)
+
+- New `prepared` state in `TournamentStatus` between `open` and `in_progress`. Format and draw are decided at `prepare` time, after registrations close. `Tournament.format` is now nullable until prepare.
+- Two formats supported: `round_robin` (Berger pairings) and `groups_playoff` (snake-seeded groups, full placement — every player plays through to a final position via parallel sub-brackets, one per `groupRank`). `single_elim` and `swiss` stay in the enum but `prepare` rejects them with `400 unsupported format in v1`.
+- New endpoints under `/tournaments`:
+  - `POST /:id/prepare` — runs the seeded draw atomically.
+  - `POST /:id/rewind` — `prepared → open`; allowed only with zero `completed` matches; clears draw + matches + format.
+  - `POST /:id/start` — `prepared → in_progress`.
+  - `DELETE /:id/participants/:playerId` — hard-delete in `draft`/`open`, soft-delete (`withdrawnAt`) in `prepared`. Removes scheduled matches involving the dropped player.
+  - `PATCH /:id/matches/:matchId/result` — records a result on a `scheduled` match; runs `advanceBracket` inline to write group ranks, generate next-round Match rows, and stamp `finalPosition` when sub-brackets resolve.
+  - `GET /:id/standings` — RTTF tiebreaker cascade (points → H2H → sets ratio → points ratio, mini-table on tied subset only).
+  - `GET /:id/next-matches?limit=N` — stateless prioritized queue, defaults `limit = numberOfTables`.
+- New columns: `Tournament.numberOfTables` (default 1), `Tournament.groupSize`, `Tournament.bracketShape (Json)`, `TournamentParticipant.groupLetter / groupRank / withdrawnAt`, `Match.groupLetter / bracketLabel`.
+- New index `Match(tournamentId, status, round)` for the next-matches query.
+- New pure-function module `apps/api/src/tournaments/draw/`: `seeding.ts`, `round-robin.ts`, `group-draw.ts`, `bracket-shape.ts`, `tiebreakers.ts`, `advance.ts`. All have unit tests with no Prisma involvement.
+
+### Changed — tightened state checks
+
+- `POST /tournaments/:id/matches` (legacy) now rejects in `prepared`+ states (use the result PATCH instead).
+- `POST /tournaments/:id/finalize` now rejects when status ≠ `in_progress`.
+- `POST /tournaments` body no longer requires `format` (it's chosen at prepare time).
+
 ### Changed — schema tidy-up (2026-04-24)
 
 - Dropped dead provenance columns from `players`: `rating_source`, `source_rating`, `source_url`, `import_date`. The `RatingSource` enum is removed entirely. The import seeded `internal_rating` once; nothing else read these columns.
