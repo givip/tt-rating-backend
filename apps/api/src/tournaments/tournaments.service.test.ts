@@ -25,6 +25,7 @@ function mockPrisma(opts: {
     tournament: {
       create: vi.fn().mockResolvedValue({}),
       findUnique: vi.fn().mockResolvedValue(opts.tournament ?? null),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(opts.tournament ?? {}),
       findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -42,6 +43,10 @@ function mockPrisma(opts: {
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       count: vi.fn().mockResolvedValue(0),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
     },
   };
   prisma.$transaction = vi.fn(async (fn: any) => fn(prisma));
@@ -639,5 +644,74 @@ describe('TournamentsService.dropParticipant', () => {
     const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
     await expect(svc.dropParticipant('t1', 'p1', { userId:'u1', role:'organizer' }))
       .rejects.toThrow(/cannot drop/);
+  });
+});
+
+describe('TournamentsService.patchMatchResult', () => {
+  it('rejects if match not scheduled', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', organizerId:'u1', matchFormat:'bo5' },
+    });
+    p.match.findUnique.mockResolvedValue({
+      id:'m1', tournamentId:'t1', status:'completed', player1Id:'p1', player2Id:'p2',
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.patchMatchResult('t1','m1',
+      { winnerId:'p1', setsPlayer1:3, setsPlayer2:0 },
+      { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/scheduled/);
+  });
+
+  it('rejects winnerId not one of the two players', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', organizerId:'u1', matchFormat:'bo5' },
+    });
+    p.match.findUnique.mockResolvedValue({
+      id:'m1', tournamentId:'t1', status:'scheduled', player1Id:'p1', player2Id:'p2',
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.patchMatchResult('t1','m1',
+      { winnerId:'p99', setsPlayer1:3, setsPlayer2:0 },
+      { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/winnerId/);
+  });
+
+  it('flips status to completed and persists the result', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'in_progress', organizerId:'u1', matchFormat:'bo5', format:'round_robin' },
+    });
+    const completedMatch = {
+      id:'m1', tournamentId:'t1', status:'completed', player1Id:'p1', player2Id:'p2',
+      round:1, groupLetter:null, bracketLabel:null, winnerId:'p1', setsPlayer1:3, setsPlayer2:1,
+    };
+    p.match.findUnique.mockResolvedValueOnce({
+      ...completedMatch, status:'scheduled', winnerId:null,
+    });
+    p.match.findUniqueOrThrow.mockResolvedValue(completedMatch);
+    p.tournament.findUniqueOrThrow.mockResolvedValue({
+      id:'t1', format:'round_robin',
+    });
+    // Make findMany return empty so advance() does nothing further.
+    p.match.findMany.mockResolvedValue([]);
+    p.tournamentParticipant.findMany.mockResolvedValue([]);
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await svc.patchMatchResult('t1','m1',
+      { winnerId:'p1', setsPlayer1:3, setsPlayer2:1 },
+      { userId:'u1', role:'organizer' });
+    expect(p.match.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id:'m1' },
+      data: expect.objectContaining({ status:'completed', winnerId:'p1', setsPlayer1:3, setsPlayer2:1 }),
+    }));
+  });
+
+  it('rejects when tournament not in_progress', async () => {
+    const p = mockPrisma({
+      tournament: { id:'t1', status:'prepared', organizerId:'u1', matchFormat:'bo5' },
+    });
+    const svc = new TournamentsService(p as any, mockRatingTrigger() as any);
+    await expect(svc.patchMatchResult('t1','m1',
+      { winnerId:'p1', setsPlayer1:3, setsPlayer2:0 },
+      { userId:'u1', role:'organizer' }))
+      .rejects.toThrow(/in_progress/);
   });
 });

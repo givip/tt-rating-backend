@@ -15,6 +15,7 @@ import { distributeIntoGroups } from './draw/group-draw';
 import { generateRoundRobinPairings } from './draw/round-robin';
 import { buildPlacementBrackets } from './draw/bracket-shape';
 import { seedParticipants } from './draw/seeding';
+import { advanceBracket } from './draw/advance';
 
 /**
  * The authenticated caller, as attached to the request by `JwtAuthGuard`.
@@ -493,6 +494,80 @@ export class TournamentsService {
    * the draw is already persisted by `prepare()`, so this is the moment
    * organizers commit to that draw and start scheduling matches.
    */
+  /**
+   * Record a result on a previously-`scheduled` match and immediately drive
+   * the bracket forward in the same transaction. Bundling the update and
+   * `advanceBracket()` into one tx is intentional: a partially-advanced
+   * bracket (result persisted but next round not generated) would silently
+   * stall the tournament until someone noticed, so we'd rather fail the
+   * whole patch than leave the system in that state.
+   */
+  async patchMatchResult(
+    tournamentId: string,
+    matchId: string,
+    body: {
+      winnerId: string;
+      setsPlayer1: number;
+      setsPlayer2: number;
+      scoreDetails?: unknown;
+      playedAt?: Date;
+    },
+    actor: Actor,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx: any) => {
+      const t = await tx.tournament.findUnique({ where: { id: tournamentId } });
+      if (!t) throw new NotFoundException('Tournament not found');
+      this.assertCanModify(t, actor);
+      if (t.status !== 'in_progress') {
+        throw new BadRequestException(
+          `can only enter results in in_progress; got ${t.status}`,
+        );
+      }
+      const m = await tx.match.findUnique({ where: { id: matchId } });
+      if (!m || m.tournamentId !== tournamentId) {
+        throw new NotFoundException('Match not found in this tournament');
+      }
+      if (m.status !== 'scheduled') {
+        throw new BadRequestException(
+          `match must be scheduled to record result; got ${m.status}`,
+        );
+      }
+      if (body.winnerId !== m.player1Id && body.winnerId !== m.player2Id) {
+        throw new BadRequestException('winnerId must be one of the two players');
+      }
+      const winnerSets =
+        body.winnerId === m.player1Id ? body.setsPlayer1 : body.setsPlayer2;
+      const loserSets =
+        body.winnerId === m.player1Id ? body.setsPlayer2 : body.setsPlayer1;
+      if (winnerSets <= loserSets) {
+        throw new BadRequestException(
+          "winner's set count must be greater than loser's",
+        );
+      }
+      const matchWeight = this.calculateMatchWeight(
+        t.matchFormat,
+        winnerSets,
+        loserSets,
+      );
+
+      await tx.match.update({
+        where: { id: matchId },
+        data: {
+          winnerId: body.winnerId,
+          setsPlayer1: body.setsPlayer1,
+          setsPlayer2: body.setsPlayer2,
+          scoreDetails: (body.scoreDetails as any) ?? null,
+          playedAt: body.playedAt ?? new Date(),
+          matchWeight,
+          status: 'completed',
+          enteredBy: actor.userId,
+        },
+      });
+
+      await advanceBracket(tournamentId, matchId, tx);
+    });
+  }
+
   async start(tournamentId: string, actor: Actor): Promise<void> {
     const t = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
