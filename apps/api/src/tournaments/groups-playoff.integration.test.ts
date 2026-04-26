@@ -191,4 +191,107 @@ describe('Groups+playoff tournament integration', () => {
     expect(p1.finalPosition).toBe(1);
     expect(p15.finalPosition).toBe(15);
   });
+
+  it('Test 6: GP N=12 — scripted tiebreaker via RTTF cascade', async () => {
+    // Same player layout as Test 4 — 12 players, snake A=[1,6,7,12], B=[2,5,8,11], C=[3,4,9,10]
+    const players = await Promise.all(
+      Array.from({ length: 12 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+    );
+    const [P1, P2, P3, , , P6, P7, P8, P9, , , P12] = players;
+    void P2; void P3; void P8; void P9;  // referenced by ID below; silence unused-var TS warnings
+
+    const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
+    await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
+
+    // PREPARE first so we can read the actual match-row orientations.
+    await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/tournaments/${tournamentId}/prepare`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+      payload: { format: 'groups_playoff', groupSize: 4 },
+    }).then(r => expect(r.statusCode).toBe(201));
+
+    // Build override map for Group A's 6 matches creating a 3-way tie at 2 wins each.
+    // Encoded as canonical (winner, loser, winnerSets, loserSets); flipped to
+    // setsPlayer1/setsPlayer2 below based on actual match-row player1 orientation.
+    type ScriptedScore = { winnerId: string; winnerSets: number; loserSets: number };
+    const scoreOf: Record<string, ScriptedScore> = {
+      [pairKey(P1.playerId, P6.playerId)]:  { winnerId: P1.playerId,  winnerSets: 3, loserSets: 1 },
+      [pairKey(P1.playerId, P7.playerId)]:  { winnerId: P7.playerId,  winnerSets: 3, loserSets: 0 },
+      [pairKey(P1.playerId, P12.playerId)]: { winnerId: P1.playerId,  winnerSets: 3, loserSets: 0 },
+      [pairKey(P6.playerId, P7.playerId)]:  { winnerId: P6.playerId,  winnerSets: 3, loserSets: 0 },
+      [pairKey(P6.playerId, P12.playerId)]: { winnerId: P6.playerId,  winnerSets: 3, loserSets: 0 },
+      [pairKey(P7.playerId, P12.playerId)]: { winnerId: P7.playerId,  winnerSets: 3, loserSets: 0 },
+    };
+    const overrides = new Map<string, ResultOverride>();
+    const groupAMatches = await h.prisma.match.findMany({
+      where: { tournamentId, groupLetter: 'A' },
+    });
+    for (const m of groupAMatches) {
+      const k = pairKey(m.player1Id, m.player2Id);
+      const s = scoreOf[k];
+      if (!s) continue;
+      const setsPlayer1 = s.winnerId === m.player1Id ? s.winnerSets : s.loserSets;
+      const setsPlayer2 = s.winnerId === m.player1Id ? s.loserSets : s.winnerSets;
+      overrides.set(k, { winnerId: s.winnerId, setsPlayer1, setsPlayer2 });
+    }
+
+    // START → PLAY → FINALIZE
+    await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/tournaments/${tournamentId}/start`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+    }).then(r => expect(r.statusCode).toBe(201));
+
+    await playOutTournament(h.app, h.organizerToken, h.prisma, tournamentId, { overrides });
+
+    await h.app.inject({
+      method: 'PATCH',
+      url: `/api/v1/tournaments/${tournamentId}/finalize`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+    }).then(r => expect(r.statusCode).toBe(200));
+
+    // CROWN-JEWEL ASSERTIONS
+    // Group A's groupRank ordering after RTTF cascade resolves the 3-way tie
+    // at sets-ratio: P6 (4/3 ≈ 1.333) > P7 (1.0) > P1 (3/4 = 0.75); P12 last.
+    const groupAFinal = await h.prisma.tournamentParticipant.findMany({
+      where: { tournamentId, groupLetter: 'A' },
+      orderBy: { groupRank: 'asc' },
+    });
+    expect(groupAFinal.map(p => p.playerId)).toEqual([
+      P6.playerId, P7.playerId, P1.playerId, P12.playerId,
+    ]);
+
+    // bracketShape is built at prepare time with STATIC positional pairings:
+    // group A → bracket-seed 1 (bye), B → 2, C → 3. The slot bindings don't
+    // re-seed at advance time. So whoever wins group A inherits the bye slot.
+    //
+    // Rank-1 sub-bracket (places-1-to-3):
+    //   - 1A = P6 (group A's tiebreaker winner) → bye to F
+    //   - 1B = P2 vs 1C = P3 in R1 → P2 wins (lower seed)
+    //   - F: P6 vs P2 → P2 wins (lower seed)
+    //   - finalPositions: P2=1, P6=2, P3=3
+    const finalP2 = await h.prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_playerId: { tournamentId, playerId: P2.playerId } },
+    });
+    const finalP6 = await h.prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_playerId: { tournamentId, playerId: P6.playerId } },
+    });
+    const finalP3 = await h.prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_playerId: { tournamentId, playerId: P3.playerId } },
+    });
+    expect(finalP2.finalPosition).toBe(1);
+    expect(finalP6.finalPosition).toBe(2);
+    expect(finalP3.finalPosition).toBe(3);
+
+    // Rank-3 sub-bracket (places-7-to-9):
+    //   - 3A = P1 (group A's 3rd via the upset cascade) → bye to F
+    //   - 3B = P8 vs 3C = P9 in R1 → P8 wins
+    //   - F: P1 vs P8 → P1 wins
+    //   - finalPositions: P1=7, P8=8, P9=9
+    const finalP1 = await h.prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_playerId: { tournamentId, playerId: P1.playerId } },
+    });
+    expect(finalP1.finalPosition).toBe(7);
+  });
 });
