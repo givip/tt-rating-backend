@@ -435,6 +435,11 @@ export class TournamentsService {
         );
       }
       await tx.match.deleteMany({ where: { tournamentId } });
+      // withdrawnAt is intentionally NOT reset here. A player who explicitly
+      // withdrew shouldn't be silently re-added when the organizer rewinds the
+      // draw — the withdrawal was a player-side commitment-cancellation. To
+      // bring them back, the organizer must explicitly re-add the participant
+      // (DELETE-then-POST). Pinned by Test 12 in the integration suite.
       await tx.tournamentParticipant.updateMany({
         where: { tournamentId },
         data: { seed: null, groupLetter: null, groupRank: null },

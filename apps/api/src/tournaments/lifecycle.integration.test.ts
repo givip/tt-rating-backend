@@ -213,4 +213,116 @@ describe('Tournament lifecycle integration', () => {
     const ratingChanges = await h.prisma.ratingChange.findMany({ where: { tournamentId } });
     expect(ratingChanges.length).toBe(7);
   });
+
+  it('Test 12: rewind preserves withdrawnAt; re-prepare excludes withdrawn players', async () => {
+    const players = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
+    );
+    const [P1, P2, P3, P4, P5, P6, P7, P8] = players;
+    void P1; void P2; void P3; void P4; void P6; void P7; void P8;
+
+    const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
+    await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
+
+    // 1. PREPARE as GP gs=4. Snake into A=[P1,P4,P5,P8], B=[P2,P3,P6,P7].
+    await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/tournaments/${tournamentId}/prepare`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+      payload: { format: 'groups_playoff', groupSize: 4 },
+    }).then(r => expect(r.statusCode).toBe(201));
+
+    // 2. DROP P5 (soft delete).
+    const dropRes = await h.app.inject({
+      method: 'DELETE',
+      url: `/api/v1/tournaments/${tournamentId}/participants/${P5.playerId}`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+    });
+    expect(dropRes.statusCode).toBe(200);
+
+    // 3. REWIND. P5's withdrawnAt is preserved (not cleared).
+    await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/tournaments/${tournamentId}/rewind`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+    }).then(r => expect(r.statusCode).toBe(201));
+
+    const afterRewind = await h.prisma.tournament.findUniqueOrThrow({
+      where: { id: tournamentId },
+    });
+    expect(afterRewind.status).toBe('open');
+    expect(afterRewind.format).toBeNull();
+    expect(afterRewind.bracketShape).toBeNull();
+    expect(afterRewind.groupSize).toBeNull();
+
+    const matchesAfterRewind = await h.prisma.match.findMany({ where: { tournamentId } });
+    expect(matchesAfterRewind.length).toBe(0);
+
+    const allParticipants = await h.prisma.tournamentParticipant.findMany({
+      where: { tournamentId },
+    });
+    expect(allParticipants.length).toBe(8);
+    const p5Row = allParticipants.find(p => p.playerId === P5.playerId)!;
+    expect(p5Row.withdrawnAt).not.toBeNull();   // ← preserved
+    const activeRows = allParticipants.filter(p => p.withdrawnAt === null);
+    expect(activeRows.length).toBe(7);
+    expect(activeRows.every(p => p.seed === null)).toBe(true);
+    expect(activeRows.every(p => p.groupLetter === null)).toBe(true);
+    expect(activeRows.every(p => p.groupRank === null)).toBe(true);
+
+    // 4. RE-PREPARE as round_robin → only 7 active participants → 21 matches.
+    await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/tournaments/${tournamentId}/prepare`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+      payload: { format: 'round_robin' },
+    }).then(r => expect(r.statusCode).toBe(201));
+
+    const afterReprepare = await h.prisma.tournament.findUniqueOrThrow({
+      where: { id: tournamentId },
+    });
+    expect(afterReprepare.format).toBe('round_robin');
+
+    const matchesAfterReprepare = await h.prisma.match.findMany({ where: { tournamentId } });
+    expect(matchesAfterReprepare.length).toBe(21);   // 7×6/2
+
+    const matchesWithP5 = matchesAfterReprepare.filter(m =>
+      m.player1Id === P5.playerId || m.player2Id === P5.playerId);
+    expect(matchesWithP5.length).toBe(0);
+
+    // 5. START → PLAY → FINALIZE.
+    await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/tournaments/${tournamentId}/start`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+    }).then(r => expect(r.statusCode).toBe(201));
+
+    await playOutTournament(h.app, h.organizerToken, h.prisma, tournamentId);
+
+    await h.app.inject({
+      method: 'PATCH',
+      url: `/api/v1/tournaments/${tournamentId}/finalize`,
+      headers: { authorization: `Bearer ${h.organizerToken}` },
+    }).then(r => expect(r.statusCode).toBe(200));
+
+    // 6. ASSERTIONS.
+    const final = await h.prisma.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
+    expect(final.status).toBe('completed');
+
+    const activeFinal = await h.prisma.tournamentParticipant.findMany({
+      where: { tournamentId, withdrawnAt: null },
+      orderBy: { finalPosition: 'asc' },
+    });
+    expect(activeFinal.map(p => p.finalPosition)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+    const p5Final = await h.prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_playerId: { tournamentId, playerId: P5.playerId } },
+    });
+    expect(p5Final.finalPosition).toBeNull();
+    expect(p5Final.withdrawnAt).not.toBeNull();
+
+    // 7 RatingChange rows (P5 didn't play, gets none).
+    const ratingChanges = await h.prisma.ratingChange.findMany({ where: { tournamentId } });
+    expect(ratingChanges.length).toBe(7);
+  });
 });
