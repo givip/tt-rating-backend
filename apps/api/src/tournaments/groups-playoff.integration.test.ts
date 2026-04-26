@@ -7,46 +7,13 @@ import {
 } from './__test-utils__/setup';
 import { createPlayer, createTournament, addParticipants } from './__test-utils__/factories';
 import { playOutTournament, pairKey, type ResultOverride } from './__test-utils__/play-out';
+import { runFullLifecycle } from './__test-utils__/lifecycle';
 
 let h: IntegrationAppHandle;
 
 beforeAll(async () => { h = await setupIntegrationApp(); });
 afterAll(async () => { await teardownIntegrationApp(h); });
 beforeEach(async () => { await truncateTestData(h.prisma); });
-
-/**
- * Helper that drives the standard lifecycle from prepare to finalize.
- * Used by every test in this file.
- */
-async function runFullLifecycle(
-  tournamentId: string,
-  prepareBody: Record<string, unknown>,
-  overrides?: Map<string, ResultOverride>,
-): Promise<void> {
-  const prep = await h.app.inject({
-    method: 'POST',
-    url: `/api/v1/tournaments/${tournamentId}/prepare`,
-    headers: { authorization: `Bearer ${h.organizerToken}` },
-    payload: prepareBody,
-  });
-  expect(prep.statusCode).toBe(201);
-
-  const start = await h.app.inject({
-    method: 'POST',
-    url: `/api/v1/tournaments/${tournamentId}/start`,
-    headers: { authorization: `Bearer ${h.organizerToken}` },
-  });
-  expect(start.statusCode).toBe(201);
-
-  await playOutTournament(h.app, h.organizerToken, h.prisma, tournamentId, { overrides });
-
-  const fin = await h.app.inject({
-    method: 'PATCH',
-    url: `/api/v1/tournaments/${tournamentId}/finalize`,
-    headers: { authorization: `Bearer ${h.organizerToken}` },
-  });
-  expect(fin.statusCode).toBe(200);
-}
 
 describe('Groups+playoff tournament integration', () => {
   it('Test 3: GP N=16 gs=4 — clean case', async () => {
@@ -56,7 +23,7 @@ describe('Groups+playoff tournament integration', () => {
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
 
-    await runFullLifecycle(tournamentId, { format: 'groups_playoff', groupSize: 4 });
+    await runFullLifecycle(h.app, h.organizerToken, h.prisma, tournamentId, { format: 'groups_playoff', groupSize: 4 });
 
     const t = await h.prisma.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
     expect(t.status).toBe('completed');
@@ -109,7 +76,7 @@ describe('Groups+playoff tournament integration', () => {
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
 
-    await runFullLifecycle(tournamentId, { format: 'groups_playoff', groupSize: 4 });
+    await runFullLifecycle(h.app, h.organizerToken, h.prisma, tournamentId, { format: 'groups_playoff', groupSize: 4 });
 
     const t = await h.prisma.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
     expect(t.status).toBe('completed');
@@ -156,7 +123,7 @@ describe('Groups+playoff tournament integration', () => {
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
 
-    await runFullLifecycle(tournamentId, { format: 'groups_playoff', groupSize: 5 });
+    await runFullLifecycle(h.app, h.organizerToken, h.prisma, tournamentId, { format: 'groups_playoff', groupSize: 5 });
 
     const t = await h.prisma.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
     expect(t.status).toBe('completed');
