@@ -40,3 +40,65 @@ export async function runFullLifecycle(
   });
   expect(fin.statusCode).toBe(200);
 }
+
+/**
+ * Propose a casual match (proposer's token), then accept it (opponent's
+ * token). Asserts both calls succeed. The rating-job runs in-process when
+ * the accept fires (InProcessRatingJobTrigger calls processCasualMatch
+ * synchronously).
+ *
+ * Default scoreline is `setsPlayer1=3, setsPlayer2=0` (winner takes all).
+ * Override either to script different match shapes.
+ */
+export async function playCasualMatch(
+  app: NestFastifyApplication,
+  prisma: PrismaClient,
+  opts: {
+    proposerToken: string;
+    opponentToken: string;
+    opponentPlayerId: string;
+    winnerPlayerId: string;
+    setsPlayer1?: number;
+    setsPlayer2?: number;
+  },
+): Promise<{ matchId: string }> {
+  const setsPlayer1 = opts.setsPlayer1 ?? 3;
+  const setsPlayer2 = opts.setsPlayer2 ?? 0;
+
+  // Step 1: proposer creates the match.
+  const proposeRes = await app.inject({
+    method: 'POST',
+    url: '/api/v1/casual-matches',
+    headers: { authorization: `Bearer ${opts.proposerToken}` },
+    payload: {
+      opponentId: opts.opponentPlayerId,
+      winnerId: opts.winnerPlayerId,
+      setsPlayer1,
+      setsPlayer2,
+    },
+  });
+  if (proposeRes.statusCode !== 201) {
+    throw new Error(
+      `casual propose failed: ${proposeRes.statusCode} ${proposeRes.body}`,
+    );
+  }
+  const { id: matchId } = proposeRes.json() as { id: string };
+
+  // Step 2: opponent accepts.
+  const acceptRes = await app.inject({
+    method: 'POST',
+    url: `/api/v1/casual-matches/${matchId}/accept`,
+    headers: { authorization: `Bearer ${opts.opponentToken}` },
+  });
+  if (acceptRes.statusCode !== 200 && acceptRes.statusCode !== 201) {
+    throw new Error(
+      `casual accept failed: ${acceptRes.statusCode} ${acceptRes.body}`,
+    );
+  }
+
+  // `prisma` reserved for future use (e.g. confirming the rating-change
+  // rows landed before returning); not needed for the v1 helper.
+  void prisma;
+
+  return { matchId };
+}
