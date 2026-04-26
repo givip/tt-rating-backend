@@ -53,7 +53,9 @@ export async function processTournament(
   const tournament = await prisma.tournament.findUnique({
     where: { id: tournamentId },
     include: {
-      participants: true,
+      // Skip withdrawn participants — they didn't play, so no rating change
+      // applies. The participant row stays for audit (withdrawnAt timestamp).
+      participants: { where: { withdrawnAt: null } },
       matches: { where: { status: 'completed' } },
     },
   });

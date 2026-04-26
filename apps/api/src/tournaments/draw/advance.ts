@@ -113,12 +113,47 @@ async function maybeGenerateBracketR1(
 
   const shape = tournament.bracketShape as BracketShape;
   const newRows: any[] = [];
+
   for (const sub of shape.subBrackets) {
+    // Count actual entrants for this sub-bracket: how many active participants
+    // would land in it given their groupRank? bracketShape was built at
+    // prepare time assuming uniform groups; at advance time we may have
+    // fewer entrants (drops in `prepared`, smaller groups, etc).
+    const entrants = allParticipants.filter(
+      (p: any) => p.groupRank === sub.fromGroupRank,
+    );
+
+    if (entrants.length === 0) {
+      // No entrants — sub-bracket is empty. Skip entirely.
+      continue;
+    }
+    if (entrants.length === 1) {
+      // Lone entrant — no KO matches. Assign finalPosition directly from
+      // the sub-bracket's `lo` value.
+      const lo = parseLo(sub.label);
+      if (lo !== null) {
+        await tx.tournamentParticipant.update({
+          where: {
+            tournamentId_playerId: { tournamentId, playerId: entrants[0].playerId },
+          },
+          data: { finalPosition: lo },
+        });
+      }
+      continue;
+    }
+
+    // Normal path: ≥2 entrants. Generate R1 Match rows from shape pairings,
+    // skipping any pairing whose slot has no actual entrant (e.g., a group
+    // ran short and its rank-K finisher doesn't exist).
     const r1 = sub.rounds[0];
     for (const p of r1.pairings) {
-      const leftPlayer = resolveSlot(p.left, allParticipants);
-      const rightPlayer = p.right ? resolveSlot(p.right, allParticipants) : null;
-      // Bye: skip Match creation; the leftPlayer auto-advances.
+      const leftPlayer = resolveSlotIfPresent(p.left, allParticipants);
+      const rightPlayer = p.right ? resolveSlotIfPresent(p.right, allParticipants) : null;
+      // Skip if either slot can't be filled. A real bye (right === null in
+      // shape) and a "missing entrant" both arrive here as `null`; both are
+      // handled the same way — skip the pairing, the standing player (if
+      // any) advances when the next round's opponent emerges.
+      if (leftPlayer === null) continue;
       if (rightPlayer === null) continue;
       newRows.push({
         tournamentId,
@@ -132,11 +167,14 @@ async function maybeGenerateBracketR1(
       });
     }
   }
+
   if (newRows.length > 0) {
     await tx.match.createMany({ data: newRows });
   }
 }
 
+/** Strict resolver — throws if the slot has no entrant. Used in the
+ * post-R1 next-round generation path where slots SHOULD always resolve. */
 function resolveSlot(slot: BracketSlotRef, participants: any[]): string {
   if (slot.kind === 'group') {
     const p = participants.find(p => p.groupLetter === slot.group && p.groupRank === slot.rank);
@@ -144,6 +182,23 @@ function resolveSlot(slot: BracketSlotRef, participants: any[]): string {
     return p.playerId;
   }
   throw new Error('cannot resolve winnerOf at R1 generation time');
+}
+
+/** Tolerant resolver — returns null if the slot has no actual entrant.
+ * Used when generating R1 matches from a bracketShape that may have phantom
+ * slots (drops in `prepared`, non-uniform groups). */
+function resolveSlotIfPresent(slot: BracketSlotRef, participants: any[]): string | null {
+  if (slot.kind === 'group') {
+    const p = participants.find(p => p.groupLetter === slot.group && p.groupRank === slot.rank);
+    return p ? p.playerId : null;
+  }
+  return null;
+}
+
+/** Parse 'places-7-to-9' → 7. Returns null on unrecognized labels. */
+function parseLo(label: string): number | null {
+  const m = label.match(/^places-(\d+)-to-\d+$/);
+  return m ? parseInt(m[1], 10) : null;
 }
 
 async function maybeAdvanceSubBracket(
