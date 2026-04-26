@@ -2,6 +2,12 @@
   "name": "@tt-rating/api",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/givip/tt-rating-backend",
+    "directory": "apps/api"
+  },
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",

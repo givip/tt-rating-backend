@@ -39,6 +39,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: backend/pnpm-lock.yaml
+      - name: Build core (workspace dep — its dist/ must exist before backend typecheck/build)
+        run: cd ../core && pnpm install --no-frozen-lockfile && pnpm run build
       - run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: cd packages/db && pnpm exec prisma generate
@@ -68,6 +70,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: backend/pnpm-lock.yaml
+      - name: Build core (workspace dep — its dist/ must exist before backend typecheck/build)
+        run: cd ../core && pnpm install --no-frozen-lockfile && pnpm run build
       - run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: cd packages/db && pnpm exec prisma generate
@@ -103,6 +107,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: backend/pnpm-lock.yaml
+      - name: Build core (workspace dep — its dist/ must exist before backend typecheck/build)
+        run: cd ../core && pnpm install --no-frozen-lockfile && pnpm run build
       - run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: cd packages/db && pnpm exec prisma generate
