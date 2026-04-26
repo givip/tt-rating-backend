@@ -10,12 +10,27 @@ env:
   PNPM_VERSION: "9.15.0"
   NODE_VERSION: "20"
 
+# This repo declares `@tt-rating/core` as `file:../../../core` in
+# apps/api/package.json. To make `pnpm install` resolve, we check out the
+# backend and core into sibling directories under $GITHUB_WORKSPACE so that
+# from `backend/apps/api/`, the path `../../../core` lands on `core/`.
 jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          path: backend
+      - name: Checkout core (workspace dep via file:../../../core)
+        uses: actions/checkout@v4
+        with:
+          repository: givip/tt-rating-core
+          path: core
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -23,32 +38,28 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: cd packages/db && pnpm exec prisma generate
       - run: pnpm turbo typecheck
 
   test:
-    name: Tests
+    name: Tests (unit + integration)
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: ttrating
-          POSTGRES_PASSWORD: ttrating
-          POSTGRES_DB: ttrating
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    env:
-      DATABASE_URL: postgresql://ttrating:ttrating@localhost:5432/ttrating
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          path: backend
+      - name: Checkout core
+        uses: actions/checkout@v4
+        with:
+          repository: givip/tt-rating-core
+          path: core
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -56,19 +67,34 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: cd packages/db && pnpm exec prisma generate
-      - name: Run migrations
-        run: cd packages/db && pnpm exec prisma migrate deploy
-      - run: pnpm turbo test
+      - name: Unit tests (mocked Prisma)
+        run: pnpm turbo test
+      - name: Build rating-job (integration tests load it via dist/)
+        run: pnpm --filter=@tt-rating/rating-job build
+      - name: Integration tests (Testcontainers Postgres)
+        run: pnpm --filter=@tt-rating/api test:integration
 
   build:
     name: Build
     runs-on: ubuntu-latest
     needs: [typecheck, test]
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          path: backend
+      - name: Checkout core
+        uses: actions/checkout@v4
+        with:
+          repository: givip/tt-rating-core
+          path: core
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -76,6 +102,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: cd packages/db && pnpm exec prisma generate
