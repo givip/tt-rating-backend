@@ -6,6 +6,33 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 
 ## [Unreleased]
 
+### Added — Tournament integration tests Tier 1 (2026-04-26)
+
+- 8 real-Postgres integration tests covering both formats end-to-end via the full HTTP stack:
+  - `round-robin.integration.test.ts`: N=4 smallest viable, N=7 Berger odd-N bye handling.
+  - `groups-playoff.integration.test.ts`: N=16 gs=4 clean, N=12 gs=4 sub-bracket bye, N=15 gs=5 uniform, N=12 scripted RTTF tiebreaker.
+  - `lifecycle.integration.test.ts`: rewind + re-prepare, drop in prepared with ≥2-entrants rule.
+- Test infrastructure: `@testcontainers/postgresql` per-file ephemeral Postgres, real Prisma client, real NestJS+Fastify app via `app.inject(...)`. No mocks anywhere. Vitest config switched to SWC (`unplugin-swc`) so `emitDecoratorMetadata` survives the transform — required for Nest DI to wire `AppModule` cold.
+- New `pnpm test:integration` script for the slow real-DB suite. Existing `pnpm test` stays mocked-Prisma only and fast (220 tests, <5s); explicitly excludes `*.integration.test.ts`.
+- Test helpers under `apps/api/src/tournaments/__test-utils__/`: `setup.ts` (testcontainer + Nest bootstrap + organizer token), `factories.ts` (createPlayer, createTournament, addParticipants), `play-out.ts` (drives next-matches → PATCH result loop with override support).
+
+### Changed — `advance.ts` finalPosition coverage and ≥2-entrants rule
+
+- After a sub-bracket final completes, `finalPosition` is now written for **every** entrant in the sub-bracket, not just the winner + runner-up. Earlier-round losers fill `lo + 2 ..` ordered by (round descending, original tournament seed ascending). Previously only the 2 finalists got `finalPosition`, leaving other participants with `null`.
+- Sub-brackets with fewer than 2 actual entrants are skipped at advance time:
+  - Zero entrants → no-op.
+  - One entrant → `finalPosition` assigned directly from the sub-bracket's `lo` value.
+  Required by Test 7 (drop participant after prepare, group runs short) and any future scenario with non-uniform groups.
+
+### Changed — rating-job skips withdrawn participants
+
+- `processTournament` now filters tournament participants by `withdrawnAt: null`. Withdrawn rows stay for audit but get no `RatingChange` row and no Glicko delta — they didn't play any match.
+
+### Changed — packaging cleanup
+
+- `@tt-rating/types` `exports` map now includes a `default` condition (was `require` and `types` only). Vite's ESM-first resolver couldn't pick a target when the integration suite booted the full `AppModule`. Adding `default` is the standard "neither ESM nor CJS specifically" fallback.
+- `apps/api/src/tournaments/draw/advance.ts` now imports `Prisma` types from `@tt-rating/db/generated` (the workspace package) instead of `'../../../../packages/db/generated'` (a relative path TS couldn't resolve via `tsc --noEmit`).
+
 ### Added — Tournament management v1 (2026-04-25)
 
 - New `prepared` state in `TournamentStatus` between `open` and `in_progress`. Format and draw are decided at `prepare` time, after registrations close. `Tournament.format` is now nullable until prepare.
