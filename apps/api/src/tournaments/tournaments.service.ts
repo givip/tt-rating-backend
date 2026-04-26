@@ -390,7 +390,15 @@ export class TournamentsService {
             });
           }
         }
-        bracketShape = buildPlacementBrackets(groups.length, groupSize);
+        // For each rank K (1..groupSize), determine which group letters have
+        // a rank-K entrant. With non-uniform group sizes (e.g., [3,3,4,4,4,4]
+        // for N=22), only the larger groups produce a rank-4 entrant — the
+        // rank-4 sub-bracket is sized accordingly (no phantom slots).
+        const groupsByRank: string[][] = [];
+        for (let rank = 1; rank <= groupSize; rank++) {
+          groupsByRank.push(groups.filter(g => g.players.length >= rank).map(g => g.letter));
+        }
+        bracketShape = buildPlacementBrackets(groupsByRank);
       }
 
       if (matchRows.length > 0) {

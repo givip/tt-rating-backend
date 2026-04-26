@@ -261,4 +261,56 @@ describe('Groups+playoff tournament integration', () => {
     });
     expect(finalP1.finalPosition).toBe(7);
   });
+
+  it('Test 9: GP N=22 gs=4 — truly uneven groups [3,3,4,4,4,4]', async () => {
+    const players = await Promise.all(
+      Array.from({ length: 22 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2050 - i * 50 })),
+    );
+    const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
+    await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
+
+    await runFullLifecycle(h.app, h.organizerToken, h.prisma, tournamentId,
+      { format: 'groups_playoff', groupSize: 4 });
+
+    const t = await h.prisma.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
+    expect(t.status).toBe('completed');
+    expect(t.processed).toBe(true);
+
+    // Group sizes — snake distribution gives [3,3,4,4,4,4].
+    const groups = await h.prisma.tournamentParticipant.findMany({
+      where: { tournamentId, withdrawnAt: null },
+    });
+    const sizesByLetter = new Map<string, number>();
+    for (const p of groups) {
+      const letter = p.groupLetter!;
+      sizesByLetter.set(letter, (sizesByLetter.get(letter) ?? 0) + 1);
+    }
+    const sizes = [...sizesByLetter.values()].sort();
+    expect(sizes).toEqual([3, 3, 4, 4, 4, 4]);
+
+    // bracketShape has 4 sub-brackets (one per groupRank 1..4). With uneven
+    // groups, sizes differ per rank: ranks 1-3 have 6 entrants each (next
+    // pow2 = 8 with 2 byes); rank 4 has 4 entrants (size 4, no byes).
+    const shape = t.bracketShape as { subBrackets: Array<{ size: number; fromGroupRank: number }> };
+    expect(shape.subBrackets).toHaveLength(4);
+    const sizesByRank = new Map(shape.subBrackets.map(sb => [sb.fromGroupRank, sb.size]));
+    expect(sizesByRank.get(1)).toBe(8);
+    expect(sizesByRank.get(2)).toBe(8);
+    expect(sizesByRank.get(3)).toBe(8);
+    expect(sizesByRank.get(4)).toBe(4);
+
+    // 22 distinct finalPositions in 1..22 — no holes, no duplicates.
+    const allActive = await h.prisma.tournamentParticipant.findMany({
+      where: { tournamentId, withdrawnAt: null },
+      orderBy: { finalPosition: 'asc' },
+    });
+    expect(allActive.length).toBe(22);
+    expect(allActive.map(p => p.finalPosition)).toEqual(
+      Array.from({ length: 22 }, (_, i) => i + 1),
+    );
+
+    // 22 RatingChange rows.
+    const ratingChanges = await h.prisma.ratingChange.findMany({ where: { tournamentId } });
+    expect(ratingChanges.length).toBe(22);
+  });
 });

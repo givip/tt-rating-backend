@@ -59,15 +59,32 @@ function standardSeededPairs(bracketSize: number): Array<[number, number]> {
   return pairs;
 }
 
-function buildSubBracket(label: string, fromGroupRank: number, G: number): SubBracket {
+/**
+ * Build a sub-bracket for a specific rank, drawing from the given group
+ * letters (in their natural order — snake-placement order is the caller's
+ * responsibility). Bracket-seed 1 = first letter, 2 = second, etc.
+ *
+ * For non-power-of-2 entrant counts, top seeds get byes (right=null).
+ *
+ * @param label e.g. 'places-1-to-6'
+ * @param fromGroupRank which group rank this sub-bracket draws from (1..S)
+ * @param groups participating group letters; bracket-seeds are assigned in
+ *               array order (1st = bracket-seed 1, etc.)
+ */
+function buildSubBracket(
+  label: string,
+  fromGroupRank: number,
+  groups: string[],
+): SubBracket {
+  const G = groups.length;
   const size = nextPow2(G);
   const seedPairs = standardSeededPairs(size);
 
   const r1Pairings: BracketPairing[] = seedPairs.map(([topSeed, botSeed]) => {
-    const left: BracketSlotRef = { kind: 'group', group: LETTERS[topSeed - 1], rank: fromGroupRank };
+    const left: BracketSlotRef = { kind: 'group', group: groups[topSeed - 1], rank: fromGroupRank };
     const right: BracketSlotRef | null = botSeed > G
       ? null
-      : { kind: 'group', group: LETTERS[botSeed - 1], rank: fromGroupRank };
+      : { kind: 'group', group: groups[botSeed - 1], rank: fromGroupRank };
     return { left, right };
   });
 
@@ -90,17 +107,61 @@ function buildSubBracket(label: string, fromGroupRank: number, G: number): SubBr
   return { label, fromGroupRank, size, rounds };
 }
 
-export function buildPlacementBrackets(groupCount: number, groupSize: number): BracketShape {
-  if (groupCount < 2) throw new Error('at least 2 groups required for placement brackets');
-  if (groupCount > LETTERS.length) {
-    throw new Error(`too many groups: ${groupCount} (max ${LETTERS.length})`);
+/**
+ * Build the parallel placement brackets for a groups+playoff tournament.
+ *
+ * Two call shapes:
+ * 1. **Uniform groups** — `(groupCount, groupSize)`: all sub-brackets draw
+ *    from groups A..groupCount. Backwards-compatible with Tier 1 callers.
+ * 2. **Non-uniform groups** — `(groupsByRank)`: an array of length
+ *    groupSize where `groupsByRank[k-1]` is the list of group letters that
+ *    have a rank-k entrant. Sub-brackets where a rank has fewer than 2
+ *    entrants are omitted (handled by the ≥2-entrants rule in advance.ts).
+ */
+export function buildPlacementBrackets(
+  arg1: number | string[][],
+  groupSize?: number,
+): BracketShape {
+  // Resolve into a uniform `groupsByRank: string[][]` representation.
+  let groupsByRank: string[][];
+  if (typeof arg1 === 'number') {
+    if (groupSize === undefined) {
+      throw new Error('groupSize required when first arg is a count');
+    }
+    if (arg1 < 2) throw new Error('at least 2 groups required for placement brackets');
+    if (arg1 > LETTERS.length) {
+      throw new Error(`too many groups: ${arg1} (max ${LETTERS.length})`);
+    }
+    const allLetters = LETTERS.slice(0, arg1).split('');
+    groupsByRank = Array.from({ length: groupSize }, () => allLetters);
+  } else {
+    groupsByRank = arg1;
+    if (groupsByRank.length === 0) {
+      throw new Error('groupsByRank must have at least one rank');
+    }
   }
+
   const subBrackets: SubBracket[] = [];
-  for (let rank = 1; rank <= groupSize; rank++) {
-    const lo = (rank - 1) * groupCount + 1;
-    const hi = rank * groupCount;
+  let lo = 1;
+  for (let rankIdx = 0; rankIdx < groupsByRank.length; rankIdx++) {
+    const rank = rankIdx + 1;
+    const groups = groupsByRank[rankIdx];
+    if (groups.length === 0) {
+      // No entrants at this rank — skip silently. (Shouldn't happen for v1
+      // but documented for symmetry.)
+      continue;
+    }
+    if (groups.length === 1) {
+      // Lone entrant — handled by advance.ts at runtime via the ≥2-entrants
+      // rule. Don't emit a sub-bracket here (advance assigns finalPosition
+      // directly from the participant's rank).
+      lo += 1;
+      continue;
+    }
+    const hi = lo + groups.length - 1;
     const label = `places-${lo}-to-${hi}`;
-    subBrackets.push(buildSubBracket(label, rank, groupCount));
+    subBrackets.push(buildSubBracket(label, rank, groups));
+    lo = hi + 1;
   }
   return { subBrackets };
 }

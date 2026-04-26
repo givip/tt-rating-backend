@@ -201,6 +201,23 @@ function parseLo(label: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+/** Resolve a slot reference using either participant data (for `group` slots)
+ * or a previously-computed winners map (for `winnerOf` slots). Returns null
+ * if the slot's group has no entrant at the requested rank, or if the prior
+ * round's pairing produced no winner. */
+function resolveSlotOrPriorWinner(
+  slot: BracketSlotRef,
+  participants: any[],
+  winnersByRound: Map<number, Map<number, string>>,
+): string | null {
+  if (slot.kind === 'group') {
+    return resolveSlotIfPresent(slot, participants);
+  }
+  const round = slot.round;
+  const pairingIndex = slot.pairingIndex;
+  return winnersByRound.get(round)?.get(pairingIndex) ?? null;
+}
+
 async function maybeAdvanceSubBracket(
   tournamentId: string,
   tournament: { bracketShape: any },
@@ -227,47 +244,62 @@ async function maybeAdvanceSubBracket(
     });
     if (existingNext.length > 0) return; // idempotency
 
-    const winnersByPairingIdx = new Map<number, string>();
-    const completedR1Pairings = await tx.match.findMany({
-      where: { tournamentId, bracketLabel, round: completedRound },
+    // Build winners progressively from R1 through completedRound. For each
+    // round R, we need to know the winner of every pairing — including byes
+    // (whose "winner" is the auto-advancing left slot) — so the next round's
+    // `winnerOf` references can be resolved.
+    //
+    // Walking only the just-completed round (the previous implementation)
+    // worked when completedRound = 1 because R1 pairings reference groups
+    // directly. For completedRound ≥ 2, R1's winners must already be in the
+    // map before we can resolve R2's pairings.
+    const allParticipants = await tx.tournamentParticipant.findMany({
+      where: { tournamentId, withdrawnAt: null },
     });
-    let pairingIdx = 1;
-    for (const shapePairing of sub.rounds[completedRound - 1].pairings) {
-      if (shapePairing.right === null) {
-        // Bye pairing — left auto-advanced.
-        const leftSlot = shapePairing.left;
-        const allParticipants = await tx.tournamentParticipant.findMany({
-          where: { tournamentId, withdrawnAt: null },
-        });
-        winnersByPairingIdx.set(pairingIdx, resolveSlot(leftSlot, allParticipants));
-      } else {
-        const allParticipants = await tx.tournamentParticipant.findMany({
-          where: { tournamentId, withdrawnAt: null },
-        });
-        const expectedLeft = shapePairing.left.kind === 'group'
-          ? resolveSlot(shapePairing.left, allParticipants)
-          : winnersByPairingIdx.get((shapePairing.left as any).pairingIndex)!;
-        const expectedRight = shapePairing.right.kind === 'group'
-          ? resolveSlot(shapePairing.right, allParticipants)
-          : winnersByPairingIdx.get((shapePairing.right as any).pairingIndex)!;
-        const m = completedR1Pairings.find((m: any) =>
-          (m.player1Id === expectedLeft && m.player2Id === expectedRight) ||
-          (m.player1Id === expectedRight && m.player2Id === expectedLeft));
-        if (!m || !m.winnerId) {
-          return;
+    const winnersByRound = new Map<number, Map<number, string>>();
+    for (let r = 1; r <= completedRound; r++) {
+      const roundShape = sub.rounds[r - 1];
+      const completedMatches = await tx.match.findMany({
+        where: { tournamentId, bracketLabel, round: r },
+      });
+      const winnersThisRound = new Map<number, string>();
+      let pIdx = 1;
+      for (const shapePairing of roundShape.pairings) {
+        if (shapePairing.right === null) {
+          // Bye — left auto-advances IF the slot resolves.
+          const leftPlayer = resolveSlotOrPriorWinner(shapePairing.left, allParticipants, winnersByRound);
+          if (leftPlayer !== null) winnersThisRound.set(pIdx, leftPlayer);
+        } else {
+          const expectedLeft = resolveSlotOrPriorWinner(shapePairing.left, allParticipants, winnersByRound);
+          const expectedRight = resolveSlotOrPriorWinner(shapePairing.right, allParticipants, winnersByRound);
+          if (expectedLeft === null && expectedRight === null) {
+            // Both slots phantom; pairing produces no winner. Skip.
+          } else if (expectedLeft === null) {
+            winnersThisRound.set(pIdx, expectedRight!);
+          } else if (expectedRight === null) {
+            winnersThisRound.set(pIdx, expectedLeft);
+          } else {
+            // Both slots resolved → look up the actual completed match row.
+            const m = completedMatches.find((m: any) =>
+              (m.player1Id === expectedLeft && m.player2Id === expectedRight) ||
+              (m.player1Id === expectedRight && m.player2Id === expectedLeft));
+            if (!m || !m.winnerId) return;  // round not fully completed yet
+            winnersThisRound.set(pIdx, m.winnerId);
+          }
         }
-        winnersByPairingIdx.set(pairingIdx, m.winnerId);
+        pIdx++;
       }
-      pairingIdx++;
+      winnersByRound.set(r, winnersThisRound);
     }
 
+    const completedRoundWinners = winnersByRound.get(completedRound)!;
     const newRows: any[] = [];
     for (const p of nextRoundShape.pairings) {
       const leftWinnerOf = (p.left as any).pairingIndex;
       const rightWinnerOf = p.right ? (p.right as any).pairingIndex : null;
-      const leftPlayer = winnersByPairingIdx.get(leftWinnerOf)!;
-      const rightPlayer = rightWinnerOf ? winnersByPairingIdx.get(rightWinnerOf)! : null;
-      if (rightPlayer === null) continue;
+      const leftPlayer = completedRoundWinners.get(leftWinnerOf) ?? null;
+      const rightPlayer = rightWinnerOf ? (completedRoundWinners.get(rightWinnerOf) ?? null) : null;
+      if (leftPlayer === null || rightPlayer === null) continue;
       newRows.push({
         tournamentId,
         round: completedRound + 1,
