@@ -25,10 +25,10 @@ beforeEach(async () => {
 describe('Round-robin tournament integration', () => {
   it('Test 1: RR N=4 — full lifecycle, ratings update', async () => {
     // SETUP: 4 players, deterministic ratings.
-    const p1 = await createPlayer(h.prisma, { rating: 2000 });
-    const p2 = await createPlayer(h.prisma, { rating: 1900 });
-    const p3 = await createPlayer(h.prisma, { rating: 1800 });
-    const p4 = await createPlayer(h.prisma, { rating: 1700 });
+    const p1 = await createPlayer(h.prisma, h.tokenService, { rating: 2000 });
+    const p2 = await createPlayer(h.prisma, h.tokenService, { rating: 1900 });
+    const p3 = await createPlayer(h.prisma, h.tokenService, { rating: 1800 });
+    const p4 = await createPlayer(h.prisma, h.tokenService, { rating: 1700 });
 
     const { tournamentId } = await createTournament(h.prisma, {
       organizerId: h.organizerId,
@@ -107,7 +107,7 @@ describe('Round-robin tournament integration', () => {
   it('Test 2: RR N=7 — Berger odd-N bye handling', async () => {
     const players = await Promise.all(
       [2100, 2000, 1900, 1800, 1700, 1600, 1500].map(rating =>
-        createPlayer(h.prisma, { rating })),
+        createPlayer(h.prisma, h.tokenService, { rating })),
     );
 
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });

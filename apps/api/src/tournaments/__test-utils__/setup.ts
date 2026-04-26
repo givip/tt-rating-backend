@@ -16,6 +16,7 @@ export type IntegrationAppHandle = {
   container: StartedPostgreSqlContainer;
   organizerToken: string;
   organizerId: string;
+  tokenService: TokenService;
 };
 
 /**
@@ -84,6 +85,7 @@ export async function setupIntegrationApp(): Promise<IntegrationAppHandle> {
     container,
     organizerToken: accessToken,
     organizerId,
+    tokenService,
   };
 }
 

@@ -1,17 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { PrismaClient } from '@tt-rating/db/generated';
+import type { TokenService } from '../../auth/token.service';
 
 let playerCounter = 0;
 
 /**
- * Creates a User row + Player row directly via Prisma. Defaults: rating 1500,
- * RD 350, gender 'M'. Provisional + tournamentsPlayed defaults from schema.
+ * Creates a User row + Player row directly via Prisma, then issues a JWT
+ * for the player so tests can authenticate as them (needed for casual-match
+ * propose/accept flows). Defaults: rating 1500, RD 350, gender 'M',
+ * tournamentsPlayed 0.
+ *
+ * Pass `tournamentsPlayed: 5` to create a non-provisional player upfront
+ * (skips the cost of running 5 throwaway tournaments to satisfy the
+ * proposer gate on casual matches).
  */
 export async function createPlayer(
   prisma: PrismaClient,
-  opts: { rating?: number; firstNameEn?: string; lastNameEn?: string } = {},
-): Promise<{ playerId: string; userId: string }> {
+  tokenService: TokenService,
+  opts: {
+    rating?: number;
+    firstNameEn?: string;
+    lastNameEn?: string;
+    tournamentsPlayed?: number;
+  } = {},
+): Promise<{ playerId: string; userId: string; accessToken: string }> {
   const userId = randomUUID();
   const playerId = randomUUID();
   const idx = ++playerCounter;
@@ -32,9 +45,11 @@ export async function createPlayer(
       gender: 'M',
       internalRating: opts.rating ?? 1500,
       rd: 350,
+      tournamentsPlayed: opts.tournamentsPlayed ?? 0,
     },
   });
-  return { playerId, userId };
+  const { accessToken } = await tokenService.issue(userId, 'player');
+  return { playerId, userId, accessToken };
 }
 
 /**

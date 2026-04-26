@@ -17,7 +17,7 @@ beforeEach(async () => { await truncateTestData(h.prisma); });
 describe('Tournament lifecycle integration', () => {
   it('Test 8: rewind + re-prepare with different format', async () => {
     const players = await Promise.all(
-      Array.from({ length: 8 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+      Array.from({ length: 8 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
     );
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
@@ -116,7 +116,7 @@ describe('Tournament lifecycle integration', () => {
 
   it('Test 7: drop participant in prepared, group runs short', async () => {
     const players = await Promise.all(
-      Array.from({ length: 8 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+      Array.from({ length: 8 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
     );
     const [P1, P2, P3, P4, P5, P6, P7, P8] = players;
     void P1; void P2; void P3; void P4; void P6; void P7; void P8;

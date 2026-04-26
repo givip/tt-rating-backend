@@ -51,7 +51,7 @@ async function runFullLifecycle(
 describe('Groups+playoff tournament integration', () => {
   it('Test 3: GP N=16 gs=4 — clean case', async () => {
     const players = await Promise.all(
-      Array.from({ length: 16 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+      Array.from({ length: 16 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
     );
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
@@ -104,7 +104,7 @@ describe('Groups+playoff tournament integration', () => {
 
   it('Test 4: GP N=12 gs=4 — sub-bracket bye for top seed', async () => {
     const players = await Promise.all(
-      Array.from({ length: 12 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+      Array.from({ length: 12 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
     );
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
@@ -151,7 +151,7 @@ describe('Groups+playoff tournament integration', () => {
 
   it('Test 5: GP N=15 gs=5 — uniform groups, gs=5', async () => {
     const players = await Promise.all(
-      Array.from({ length: 15 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+      Array.from({ length: 15 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
     );
     const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
     await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
@@ -195,7 +195,7 @@ describe('Groups+playoff tournament integration', () => {
   it('Test 6: GP N=12 — scripted tiebreaker via RTTF cascade', async () => {
     // Same player layout as Test 4 — 12 players, snake A=[1,6,7,12], B=[2,5,8,11], C=[3,4,9,10]
     const players = await Promise.all(
-      Array.from({ length: 12 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+      Array.from({ length: 12 }, (_, i) => createPlayer(h.prisma, h.tokenService, { rating: 2000 - i * 50 })),
     );
     const [P1, P2, P3, , , P6, P7, P8, P9, , , P12] = players;
     void P2; void P3; void P8; void P9;  // referenced by ID below; silence unused-var TS warnings
