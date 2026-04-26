@@ -93,14 +93,26 @@ export async function processTournament(
       const ratingDeltaDisplay =
         toDisplayRating(newRating) - toDisplayRating(participant.ratingBefore);
 
+      // Read current Player to know the BEFORE value of tournamentsPlayed —
+      // needed so we can decide whether the +1 increment crosses the 5-
+      // tournament threshold for the provisional flip.
+      const playerBefore = await tx.player.findUniqueOrThrow({
+        where: { id: participant.playerId },
+        select: { tournamentsPlayed: true },
+      });
+
       await tx.player.update({
         where: { id: participant.playerId },
         data: {
           internalRating: newRating,
           rd: newRD,
           tournamentsPlayed: { increment: 1 },
-          // Provisional = false after 3+ tournaments
-          provisional: { set: false },
+          // Provisional gates several actions (e.g. proposing casual matches).
+          // Stay provisional until the player has finished ≥5 tournaments.
+          // The casual-match service reads `tournamentsPlayed < 5` directly;
+          // we keep the boolean in sync so other consumers (UI, reports) see
+          // a consistent view.
+          provisional: { set: playerBefore.tournamentsPlayed + 1 < 5 },
         },
       });
 
