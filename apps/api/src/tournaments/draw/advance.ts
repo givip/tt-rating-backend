@@ -1,4 +1,4 @@
-import type { Prisma } from '../../../../packages/db/generated';
+import type { Prisma } from '@tt-rating/db/generated';
 import { computeGroupStandings } from './tiebreakers';
 import type { BracketShape, BracketSlotRef } from './bracket-shape';
 
