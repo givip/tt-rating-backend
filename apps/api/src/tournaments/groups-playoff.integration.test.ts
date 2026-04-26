@@ -148,4 +148,47 @@ describe('Groups+playoff tournament integration', () => {
       Array.from({ length: 12 }, (_, i) => i + 1),
     );
   });
+
+  it('Test 5: GP N=15 gs=5 — uniform groups, gs=5', async () => {
+    const players = await Promise.all(
+      Array.from({ length: 15 }, (_, i) => createPlayer(h.prisma, { rating: 2000 - i * 50 })),
+    );
+    const { tournamentId } = await createTournament(h.prisma, { organizerId: h.organizerId });
+    await addParticipants(h.app, h.organizerToken, tournamentId, players.map(p => p.playerId));
+
+    await runFullLifecycle(tournamentId, { format: 'groups_playoff', groupSize: 5 });
+
+    const t = await h.prisma.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
+    expect(t.status).toBe('completed');
+    expect(t.groupSize).toBe(5);
+
+    const matches = await h.prisma.match.findMany({ where: { tournamentId } });
+    // 3 groups × 10 matches + 5 sub-brackets × (1 R1 + 1 final) = 30 + 10 = 40
+    expect(matches.length).toBe(40);
+
+    const groupMatches = matches.filter(m => m.groupLetter !== null);
+    expect(groupMatches.length).toBe(30);
+
+    // bracketShape has 5 sub-brackets (one per groupRank 1..5)
+    const shape = t.bracketShape as { subBrackets: Array<{ size: number }> };
+    expect(shape.subBrackets).toHaveLength(5);
+    for (const sb of shape.subBrackets) {
+      expect(sb.size).toBe(4);  // next pow2 of G=3 with bye
+    }
+
+    // 15 finalPositions
+    const participants = await h.prisma.tournamentParticipant.findMany({
+      where: { tournamentId },
+      orderBy: { finalPosition: 'asc' },
+    });
+    expect(participants.map(p => p.finalPosition)).toEqual(
+      Array.from({ length: 15 }, (_, i) => i + 1),
+    );
+
+    // P1 wins overall, P15 finishes last
+    const p1 = participants.find(p => p.playerId === players[0].playerId)!;
+    const p15 = participants.find(p => p.playerId === players[14].playerId)!;
+    expect(p1.finalPosition).toBe(1);
+    expect(p15.finalPosition).toBe(15);
+  });
 });
