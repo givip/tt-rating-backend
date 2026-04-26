@@ -1,6 +1,12 @@
 {
   "name": "tt-rating-backend",
   "private": true,
+  "license": "MIT",
+  "description": "NestJS API + Prisma schema + rating-job worker for tt-rating, the Glicko-1 table-tennis rating platform.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/givip/tt-rating-backend"
+  },
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
