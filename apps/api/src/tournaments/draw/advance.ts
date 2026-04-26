@@ -228,21 +228,72 @@ async function maybeAdvanceSubBracket(
       await tx.match.createMany({ data: newRows });
     }
   } else {
-    // Final of this sub-bracket. Write finalPosition for winner + runner-up only.
+    // Final of this sub-bracket. Sweep all completed sub-bracket matches and
+    // write finalPosition for every entrant in this sub-bracket:
+    //   - Final winner gets `lo`.
+    //   - Final loser gets `lo + 1`.
+    //   - Earlier-round losers fill `lo + 2 ..` in (round-descending,
+    //     seed-ascending) order — i.e., losers from later rounds get better
+    //     final positions; ties within a round are broken by original
+    //     tournament seed (lower seed = better placement).
     const finalMatch = roundMatches[0];
     if (!finalMatch || !finalMatch.winnerId) return;
-    const winnerId = finalMatch.winnerId;
-    const loserId = finalMatch.winnerId === finalMatch.player1Id ? finalMatch.player2Id : finalMatch.player1Id;
     const labelMatch = sub.label.match(/^places-(\d+)-to-(\d+)$/);
-    if (labelMatch) {
-      const lo = parseInt(labelMatch[1], 10);
+    if (!labelMatch) return;
+    const lo = parseInt(labelMatch[1], 10);
+
+    // Collect all completed matches in this sub-bracket.
+    const allSubBracketMatches = await tx.match.findMany({
+      where: { tournamentId, bracketLabel, status: 'completed' },
+      orderBy: { round: 'desc' },
+    });
+
+    const winnerId = finalMatch.winnerId;
+    const loserId = winnerId === finalMatch.player1Id ? finalMatch.player2Id : finalMatch.player1Id;
+
+    // Earlier-round losers, grouped by descending round.
+    const earlierLosers: Array<{ playerId: string; round: number }> = [];
+    for (const m of allSubBracketMatches) {
+      if (m.id === finalMatch.id) continue;
+      if (!m.winnerId) continue;
+      const losingPlayer =
+        m.winnerId === m.player1Id ? m.player2Id : m.player1Id;
+      earlierLosers.push({ playerId: losingPlayer, round: m.round });
+    }
+
+    // Look up the seed for every earlier loser (and the final winner/loser too,
+    // but those are placed first regardless).
+    const allParticipants = await tx.tournamentParticipant.findMany({
+      where: { tournamentId, withdrawnAt: null },
+    });
+    const seedById = new Map<string, number>();
+    for (const p of allParticipants) {
+      if (p.seed !== null) seedById.set(p.playerId, p.seed);
+    }
+
+    // Sort: round descending (later rounds = better placement), then seed
+    // ascending within each round (lower seed = better placement).
+    earlierLosers.sort((a, b) => {
+      if (a.round !== b.round) return b.round - a.round;
+      const sa = seedById.get(a.playerId) ?? Number.MAX_SAFE_INTEGER;
+      const sb = seedById.get(b.playerId) ?? Number.MAX_SAFE_INTEGER;
+      return sa - sb;
+    });
+
+    await tx.tournamentParticipant.update({
+      where: { tournamentId_playerId: { tournamentId, playerId: winnerId } },
+      data: { finalPosition: lo },
+    });
+    await tx.tournamentParticipant.update({
+      where: { tournamentId_playerId: { tournamentId, playerId: loserId } },
+      data: { finalPosition: lo + 1 },
+    });
+    for (let i = 0; i < earlierLosers.length; i++) {
       await tx.tournamentParticipant.update({
-        where: { tournamentId_playerId: { tournamentId, playerId: winnerId } },
-        data: { finalPosition: lo },
-      });
-      await tx.tournamentParticipant.update({
-        where: { tournamentId_playerId: { tournamentId, playerId: loserId } },
-        data: { finalPosition: lo + 1 },
+        where: {
+          tournamentId_playerId: { tournamentId, playerId: earlierLosers[i].playerId },
+        },
+        data: { finalPosition: lo + 2 + i },
       });
     }
   }
