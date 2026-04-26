@@ -6,6 +6,33 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 
 ## [Unreleased]
 
+### Added — Tournament integration tests Tier 2 (2026-04-26)
+
+- Four edge-case integration tests layered on top of Tier 1, total integration suite now 12 tests:
+  - `groups-playoff.integration.test.ts`: Test 9 — N=22 truly-uneven groups [3,3,4,4,4,4]; exercises bracketShape with per-rank entrant counts and the multi-round phantom-propagation path in `advance.ts`.
+  - `multi-event.integration.test.ts` (NEW): Test 10 — casual matches between Tournament A and Tournament B; verifies the rating pipeline composes (B's `ratingBefore` equals post-casual rating, not post-Tournament-A rating; B's seeds reflect post-casual ordering); Test 11 — 8 players × 3 tournaments; RD shrinks monotonically, provisional respects the ≥5-tournament threshold.
+  - `lifecycle.integration.test.ts`: Test 12 — rewind preserves `withdrawnAt`; re-prepare excludes withdrawn players.
+- New helper module `apps/api/src/tournaments/__test-utils__/lifecycle.ts`: `runFullLifecycle` (extracted from inline in `groups-playoff.integration.test.ts`) and `playCasualMatch` (proposes + accepts in one call).
+- `createPlayer` now takes a `tokenService` argument and returns `accessToken`. Optional `tournamentsPlayed` parameter lets tests create non-provisional players upfront. Backwards-incompatible — every existing call site updated.
+
+### Changed — `buildPlacementBrackets` supports non-uniform groups
+
+- New call shape: `buildPlacementBrackets(groupsByRank: string[][])` where each entry lists the group letters that have an entrant at that rank. Sub-brackets are sized to the actual entrant count per rank — no more phantom slots when group sizes differ. Previous `(groupCount, groupSize)` shape preserved for backwards compatibility.
+- `tournaments.service.ts` `prepare()` now computes `groupsByRank` from the actual snake-distributed groups before calling.
+
+### Changed — `maybeAdvanceSubBracket` walks all rounds progressively
+
+- For brackets with ≥3 rounds (size 8 or larger), the round-(N) → round-(N+1) transition needs to resolve `winnerOf` references that point back to round 1 or 2. The previous implementation only walked the just-completed round, so the local winners map was empty when round-2's pairings were processed and the transition got stuck.
+- Now walks rounds 1..completedRound progressively, building `winnersByRound[r][pairingIdx]`. Subsequent rounds resolve their `winnerOf` refs against this transitive map. Required by Test 9.
+
+### Fixed — `provisional` flip respects 5-tournament threshold
+
+- `apps/rating-job/src/index.ts` previously set `provisional: false` after every tournament. The casual-match proposer gate reads `tournamentsPlayed < 5`; the boolean now matches: `provisional` is `true` until the player has played at least 5 tournaments. Surfaces in Test 11.
+
+### Documented — `rewind` preserves `withdrawnAt`
+
+- Added a code comment in `TournamentsService.rewind()` clarifying that `withdrawnAt` is intentionally preserved across rewind. A withdrawn player stays withdrawn through re-prepare cycles unless explicitly re-added by the organizer (DELETE → POST). Pinned by Test 12.
+
 ### Added — Tournament integration tests Tier 1 (2026-04-26)
 
 - 8 real-Postgres integration tests covering both formats end-to-end via the full HTTP stack:
