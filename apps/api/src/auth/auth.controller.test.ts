@@ -48,6 +48,14 @@ function makeReq(ip = '10.0.0.1'): FastifyRequest {
   return { ip } as unknown as FastifyRequest;
 }
 
+function makePrisma(findUniqueImpl?: ReturnType<typeof vi.fn>) {
+  return {
+    user: {
+      findUnique: findUniqueImpl ?? vi.fn(),
+    },
+  } as never;
+}
+
 function makeReply() {
   const reply: any = {
     setCookie: vi.fn(() => reply),
@@ -64,7 +72,7 @@ describe('AuthController', () => {
   beforeEach(() => {
     strategy = makeStrategy({ initiate: vi.fn().mockResolvedValue(undefined) });
     tokens = makeTokens();
-    controller = new AuthController(strategy, tokens);
+    controller = new AuthController(strategy, tokens, makePrisma());
   });
 
   describe('POST /initiate', () => {
@@ -82,7 +90,7 @@ describe('AuthController', () => {
 
     it('returns {ok: true} even if strategy.initiate is undefined (password case)', async () => {
       const pwdStrategy = makeStrategy(); // no initiate
-      const c = new AuthController(pwdStrategy, tokens);
+      const c = new AuthController(pwdStrategy, tokens, makePrisma());
       const res = await c.initiate({ identifier: 'alice@example.com' }, makeReq());
       expect(res).toEqual({ ok: true });
       // No initiate method on the strategy means nothing to call.
@@ -164,7 +172,7 @@ describe('AuthController', () => {
     it('calls reply.setCookie for access and refresh tokens', async () => {
       const strategy = makeStrategy();
       const tokens = makeTokens();
-      const ctrl = new AuthController(strategy, tokens);
+      const ctrl = new AuthController(strategy, tokens, makePrisma());
 
       const cookies: Array<{ name: string; value: string }> = [];
       const reply = {
@@ -188,7 +196,7 @@ describe('AuthController', () => {
     it('returns the same body shape (browser ignores, mobile uses)', async () => {
       const strategy = makeStrategy();
       const tokens = makeTokens();
-      const ctrl = new AuthController(strategy, tokens);
+      const ctrl = new AuthController(strategy, tokens, makePrisma());
       const reply = { setCookie: () => reply };
 
       const body = await ctrl.login(
@@ -241,6 +249,52 @@ describe('AuthController', () => {
           makeReply(),
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('GET /auth/me', () => {
+    it('returns user profile fields from prisma', async () => {
+      const strategy = makeStrategy();
+      const tokens = makeTokens();
+      const prisma = {
+        user: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'u1',
+            email: 'a@b.c',
+            phone: null,
+            role: 'player',
+            createdAt: new Date('2026-01-01'),
+          }),
+        },
+      } as never;
+      const ctrl = new AuthController(strategy, tokens, prisma);
+
+      const result = await ctrl.me({ user: { userId: 'u1', role: 'player' } } as never);
+
+      expect(result).toEqual({
+        id: 'u1',
+        email: 'a@b.c',
+        phone: null,
+        role: 'player',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      expect((prisma as any).user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        select: { id: true, email: true, phone: true, role: true, createdAt: true },
+      });
+    });
+
+    it('throws 401 if user no longer exists', async () => {
+      const strategy = makeStrategy();
+      const tokens = makeTokens();
+      const prisma = {
+        user: { findUnique: vi.fn().mockResolvedValue(null) },
+      } as never;
+      const ctrl = new AuthController(strategy, tokens, prisma);
+
+      await expect(
+        ctrl.me({ user: { userId: 'gone', role: 'player' } } as never),
+      ).rejects.toThrow(UnauthorizedException);
     });
   });
 

@@ -2,17 +2,20 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   HttpCode,
   Inject,
   Post,
   Req,
   Res,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { ZodBody } from '../common/zod-swagger';
+import { PrismaService } from '../common/prisma.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import {
   AUTH_STRATEGY,
@@ -54,6 +57,7 @@ export class AuthController {
   constructor(
     @Inject(AUTH_STRATEGY) private strategy: AuthStrategy,
     private tokens: TokenService,
+    private prisma: PrismaService,
   ) {}
 
   /**
@@ -132,6 +136,28 @@ export class AuthController {
       domain: cookieDomainFromEnv(),
     });
     return tokens;
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Return profile of the authenticated user' })
+  async me(
+    @Req() req: FastifyRequest & { user: { userId: string; role: string } },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { id: true, email: true, phone: true, role: true, createdAt: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('User no longer exists');
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt.toISOString(),
+    };
   }
 
   @Post('logout')
