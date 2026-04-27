@@ -172,6 +172,8 @@ model Player {
   tournamentParticipations TournamentParticipant[]
   ratingChanges            RatingChange[]
   ratingSnapshots          RatingSnapshot[]
+  matchesAsPlayer1         Match[]          @relation("MatchPlayer1")
+  matchesAsPlayer2         Match[]          @relation("MatchPlayer2")
 
   @@index([internalRating])
   @@index([firstNameEn, lastNameEn])
@@ -280,6 +282,8 @@ model Match {
 
   tournament    Tournament? @relation(fields: [tournamentId], references: [id], onDelete: Restrict)
   enteredByUser User?       @relation("EnteredMatches", fields: [enteredBy], references: [id])
+  player1       Player      @relation("MatchPlayer1", fields: [player1Id], references: [id])
+  player2       Player      @relation("MatchPlayer2", fields: [player2Id], references: [id])
 
   @@index([tournamentId])
   @@index([player1Id])
