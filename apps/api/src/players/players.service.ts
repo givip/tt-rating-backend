@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { CreatePlayerDto, PlayerListQuery } from '@tt-rating/types';
 
@@ -90,6 +90,9 @@ export class PlayersService {
   }
 
   async playerTournaments(playerId: string, params: { page: number; limit: number }) {
+    const playerExists = await this.prisma.player.findUnique({ where: { id: playerId }, select: { id: true } });
+    if (!playerExists) throw new NotFoundException('Player not found');
+
     const { page, limit } = params;
     const skip = (page - 1) * limit;
 
@@ -112,9 +115,17 @@ export class PlayersService {
   }
 
   async playerMatches(playerId: string, params: { page: number; limit: number; since?: string }) {
+    const playerExists = await this.prisma.player.findUnique({ where: { id: playerId }, select: { id: true } });
+    if (!playerExists) throw new NotFoundException('Player not found');
+
     const { page, limit, since } = params;
     const skip = (page - 1) * limit;
-    const sinceDate = since ? new Date(since) : undefined;
+
+    let sinceDate: Date | undefined;
+    if (since) {
+      sinceDate = new Date(since);
+      if (isNaN(sinceDate.getTime())) throw new BadRequestException('since must be a valid ISO date');
+    }
 
     const where = {
       OR: [{ player1Id: playerId }, { player2Id: playerId }],
@@ -150,7 +161,7 @@ export class PlayersService {
         opponentId: opponent?.id ?? null,
         opponent: opponent ?? null,
         score: myScore != null && theirScore != null ? `${myScore}:${theirScore}` : null,
-        outcome: m.winnerId === playerId ? 'W' : 'L',
+        outcome: m.winnerId != null ? (m.winnerId === playerId ? 'W' : 'L') : null,
         tournamentId: m.tournamentId ?? null,
         tournamentTitle: m.tournament?.title ?? null,
       };

@@ -126,6 +126,7 @@ describe('PlayersService', () => {
 
   describe('playerTournaments', () => {
     it('returns paginated tournament history for a player', async () => {
+      mockPrisma.player.findUnique.mockResolvedValue({ id: 'p1' });
       mockPrisma.tournamentParticipant.findMany.mockResolvedValue([
         {
           tournamentId: 't1', finalPosition: 1, ratingDeltaDisplay: 24,
@@ -142,6 +143,7 @@ describe('PlayersService', () => {
 
   describe('playerMatches', () => {
     it('returns paginated match history with outcome computed', async () => {
+      mockPrisma.player.findUnique.mockResolvedValue({ id: 'p1' });
       mockPrisma.match.findMany.mockResolvedValue([
         {
           id: 'm1', matchType: 'tournament', playedAt: new Date('2026-04-10'),
