@@ -341,3 +341,17 @@ model RatingConfig {
 
   @@map("rating_config")
 }
+
+model Invite {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  role      UserRole
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  usedBy    String?   @map("used_by")
+  createdBy String    @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("invites")
+}
