@@ -199,6 +199,72 @@ describe('PasswordStrategy', () => {
   });
 });
 
+describe('AUTH_PASSWORD_LOOKUP_FIELDS', () => {
+  it('defaults to email,phone (parses both)', async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = { user: { findFirst } } as never;
+    const rateLimit = { check: vi.fn(), record: vi.fn() } as never;
+    const config = { get: () => undefined } as never;
+    const strategy = new PasswordStrategy(prisma, rateLimit, config);
+
+    await expect(
+      strategy.complete({ identifier: 'a@b.c', credential: 'pw' }),
+    ).rejects.toThrow();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { OR: [{ email: 'a@b.c' }, { phone: 'a@b.c' }] },
+    });
+  });
+
+  it('honours AUTH_PASSWORD_LOOKUP_FIELDS=email (only email)', async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = { user: { findFirst } } as never;
+    const rateLimit = { check: vi.fn(), record: vi.fn() } as never;
+    const config = {
+      get: (k: string) => (k === 'AUTH_PASSWORD_LOOKUP_FIELDS' ? 'email' : undefined),
+    } as never;
+    const strategy = new PasswordStrategy(prisma, rateLimit, config);
+
+    await expect(
+      strategy.complete({ identifier: 'a@b.c', credential: 'pw' }),
+    ).rejects.toThrow();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { OR: [{ email: 'a@b.c' }] },
+    });
+  });
+
+  it('honours AUTH_PASSWORD_LOOKUP_FIELDS=phone (only phone)', async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = { user: { findFirst } } as never;
+    const rateLimit = { check: vi.fn(), record: vi.fn() } as never;
+    const config = {
+      get: (k: string) => (k === 'AUTH_PASSWORD_LOOKUP_FIELDS' ? 'phone' : undefined),
+    } as never;
+    const strategy = new PasswordStrategy(prisma, rateLimit, config);
+
+    await expect(
+      strategy.complete({ identifier: '+995591234567', credential: 'pw' }),
+    ).rejects.toThrow();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { OR: [{ phone: '+995591234567' }] },
+    });
+  });
+
+  it('throws on startup-style misconfiguration (unknown field)', async () => {
+    const prisma = { user: { findFirst: vi.fn() } } as never;
+    const rateLimit = { check: vi.fn(), record: vi.fn() } as never;
+    const config = {
+      get: (k: string) => (k === 'AUTH_PASSWORD_LOOKUP_FIELDS' ? 'username' : undefined),
+    } as never;
+    const strategy = new PasswordStrategy(prisma, rateLimit, config);
+    await expect(
+      strategy.complete({ identifier: 'x', credential: 'pw' }),
+    ).rejects.toThrow(/Unknown lookup field/);
+  });
+});
+
 describe('hashPassword', () => {
   it('produces a bcrypt hash that verifies against the plaintext', async () => {
     const hash = await hashPassword('hunter2', 4);

@@ -39,6 +39,22 @@ export async function hashPassword(
   return bcrypt.hash(plain, c);
 }
 
+const ALLOWED_FIELDS = ['email', 'phone'] as const;
+type LookupField = (typeof ALLOWED_FIELDS)[number];
+
+function parseLookupFields(raw: string | undefined): LookupField[] {
+  const fields = (raw ?? 'email,phone')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const f of fields) {
+    if (!ALLOWED_FIELDS.includes(f as LookupField)) {
+      throw new Error(`Unknown lookup field: ${f}`);
+    }
+  }
+  return fields as LookupField[];
+}
+
 @Injectable()
 export class PasswordStrategy implements AuthStrategy {
   readonly name = 'password';
@@ -61,11 +77,14 @@ export class PasswordStrategy implements AuthStrategy {
     // 1. Enforce rate limit BEFORE any DB or bcrypt work. Let the 429 propagate.
     await this.rateLimit.check(identifier);
 
-    // 2. Look up by email OR phone. Identifier shape isn't known at this
-    //    layer — the controller accepts either.
+    // 2. Look up by configured fields. Default is email+phone (preserved
+    //    historic behavior); deployments can lock down via env var.
+    const lookupFields = parseLookupFields(
+      this.config.get<string>('AUTH_PASSWORD_LOOKUP_FIELDS'),
+    );
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: identifier }, { phone: identifier }],
+        OR: lookupFields.map((field) => ({ [field]: identifier })),
       },
     });
 
