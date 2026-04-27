@@ -22,16 +22,24 @@ export class JwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context
       .switchToHttp()
-      .getRequest<{ headers: Record<string, unknown>; user?: unknown }>();
+      .getRequest<{
+        headers: Record<string, unknown>;
+        cookies?: Record<string, string>;
+        user?: unknown;
+      }>();
 
     const header = req.headers?.['authorization'];
     const raw = typeof header === 'string' ? header : '';
     const match = /^Bearer\s+(.+)$/i.exec(raw.trim());
-    if (!match) {
-      throw new UnauthorizedException('Missing or malformed Authorization header');
+    const headerToken = match ? match[1].trim() : null;
+    const cookieToken = req.cookies?.['auth_token'] ?? null;
+
+    const token = headerToken ?? cookieToken;
+    if (!token) {
+      throw new UnauthorizedException('Missing authentication credentials');
     }
 
-    req.user = this.tokens.verifyAccess(match[1].trim());
+    req.user = this.tokens.verifyAccess(token);
     return true;
   }
 }

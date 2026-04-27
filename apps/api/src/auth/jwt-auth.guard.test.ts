@@ -66,3 +66,42 @@ describe('JwtAuthGuard', () => {
     expect(tokens.verifyAccess).toHaveBeenCalledWith('some-token');
   });
 });
+
+describe('JwtAuthGuard cookie fallback', () => {
+  function makeCtxWithCookies(
+    headers: Record<string, string>,
+    cookies: Record<string, string>,
+  ): ExecutionContext {
+    const req: any = { headers, cookies, user: undefined };
+    return {
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+  }
+
+  it('reads token from auth_token cookie when no Authorization header', () => {
+    const tokens = { verifyAccess: vi.fn().mockReturnValue({ userId: 'u1', role: 'player' }) } as unknown as TokenService;
+    const guard = new JwtAuthGuard(tokens);
+
+    const ctx = makeCtxWithCookies({}, { auth_token: 'cookie.tok' });
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(tokens.verifyAccess).toHaveBeenCalledWith('cookie.tok');
+  });
+
+  it('prefers Authorization header over cookie when both present', () => {
+    const tokens = { verifyAccess: vi.fn().mockReturnValue({ userId: 'u1', role: 'player' }) } as unknown as TokenService;
+    const guard = new JwtAuthGuard(tokens);
+
+    const ctx = makeCtxWithCookies(
+      { authorization: 'Bearer header.tok' },
+      { auth_token: 'cookie.tok' },
+    );
+    guard.canActivate(ctx);
+    expect(tokens.verifyAccess).toHaveBeenCalledWith('header.tok');
+  });
+
+  it('throws when neither header nor cookie present', () => {
+    const tokens = { verifyAccess: vi.fn() } as unknown as TokenService;
+    const guard = new JwtAuthGuard(tokens);
+    expect(() => guard.canActivate(makeCtxWithCookies({}, {}))).toThrow(UnauthorizedException);
+  });
+});
