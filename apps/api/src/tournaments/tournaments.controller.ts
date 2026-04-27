@@ -265,6 +265,21 @@ export class TournamentsController {
     return this.tournaments.getNextMatches(id, parsedLimit);
   }
 
+  @Get(':id/matches')
+  @ApiOperation({ summary: 'Paginated match feed for a tournament' })
+  async getTournamentMatches(
+    @Param('id') id: string,
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.tournaments.getTournamentMatches(id, {
+      page: Math.max(1, parseInt(page ?? '1', 10) || 1),
+      limit: Math.min(100, Math.max(1, parseInt(limit ?? '15', 10) || 15)),
+      status,
+    });
+  }
+
   @Patch(':id/finalize')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

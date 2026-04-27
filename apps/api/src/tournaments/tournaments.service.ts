@@ -743,4 +743,36 @@ export class TournamentsService {
       data: { status: 'in_progress' },
     });
   }
+
+  async getTournamentMatches(
+    tournamentId: string,
+    params: { page: number; limit: number; status?: string },
+  ) {
+    const t = await this.prisma.tournament.findUnique({ where: { id: tournamentId } });
+    if (!t) throw new NotFoundException('Tournament not found');
+
+    const { page, limit, status } = params;
+    const skip = (page - 1) * limit;
+    const where = {
+      tournamentId,
+      matchType: 'tournament' as const,
+      ...(status ? { status } : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.match.findMany({
+        where,
+        orderBy: { playedAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          player1: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true } },
+          player2: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true } },
+        },
+      }),
+      this.prisma.match.count({ where }),
+    ]);
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
 }

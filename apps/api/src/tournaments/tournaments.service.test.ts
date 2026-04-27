@@ -861,3 +861,34 @@ describe('TournamentsService.patchMatchResult', () => {
       .rejects.toThrow(/in_progress/);
   });
 });
+
+describe('getTournamentMatches', () => {
+  it('returns paginated completed matches ordered by playedAt desc', async () => {
+    const prisma = mockPrisma();
+    prisma.tournament.findUnique.mockResolvedValue({ id: 't1', status: 'in_progress' });
+    prisma.match.findMany.mockResolvedValue([
+      {
+        id: 'm1', round: 1, status: 'completed', playedAt: new Date('2026-04-20'),
+        player1Id: 'p1', player2Id: 'p2', winnerId: 'p1', setsPlayer1: 3, setsPlayer2: 1,
+        bracketLabel: 'Cup', groupLetter: null,
+        player1: { id: 'p1', firstNameKa: 'ა', lastNameKa: 'ბ', firstNameEn: 'A', lastNameEn: 'B' },
+        player2: { id: 'p2', firstNameKa: 'გ', lastNameKa: 'დ', firstNameEn: 'C', lastNameEn: 'D' },
+      },
+    ]);
+    prisma.match.count.mockResolvedValue(1);
+
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    const result = await svc.getTournamentMatches('t1', { page: 1, limit: 10, status: 'completed' });
+    expect(result.data).toHaveLength(1);
+    expect(result.meta.total).toBe(1);
+  });
+
+  it('throws NotFoundException for unknown tournament', async () => {
+    const prisma = mockPrisma();
+    prisma.tournament.findUnique.mockResolvedValue(null);
+
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await expect(svc.getTournamentMatches('bad-id', { page: 1, limit: 10 }))
+      .rejects.toThrow('Tournament not found');
+  });
+});
