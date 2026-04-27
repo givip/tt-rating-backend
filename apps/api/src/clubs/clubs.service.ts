@@ -9,7 +9,7 @@ export class ClubsService {
     const clubs = await this.prisma.club.findMany({
       select: {
         id: true, nameKa: true, nameEn: true, city: true,
-        _count: { select: { players: true } },
+        _count: { select: { players: { where: { isActive: true } } } },
       },
       orderBy: { players: { _count: 'desc' } },
     });
@@ -21,6 +21,7 @@ export class ClubsService {
       where: { id },
       include: {
         players: {
+          where: { isActive: true },
           select: {
             id: true, firstNameKa: true, lastNameKa: true,
             firstNameEn: true, lastNameEn: true,
@@ -34,7 +35,7 @@ export class ClubsService {
           orderBy: { startsAt: 'desc' },
           take: 20,
         },
-        _count: { select: { players: true } },
+        _count: { select: { players: { where: { isActive: true } } } },
       },
     });
     if (!club) throw new NotFoundException('Club not found');
