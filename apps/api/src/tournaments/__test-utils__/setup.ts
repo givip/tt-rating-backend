@@ -5,6 +5,7 @@ import { hash } from 'bcrypt';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import fastifyCookie from '@fastify/cookie';
 import { AppModule } from '../../app.module';
 import { PrismaService } from '../../common/prisma.service';
 import { TokenService } from '../../auth/token.service';
@@ -58,6 +59,7 @@ export async function setupIntegrationApp(): Promise<IntegrationAppHandle> {
   const app = moduleRef.createNestApplication<NestFastifyApplication>(
     new FastifyAdapter({ logger: false }),
   );
+  await app.register(fastifyCookie as never);
   app.setGlobalPrefix('api/v1');
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
@@ -107,5 +109,15 @@ export async function truncateTestData(prisma: PrismaClient): Promise<void> {
        "tournaments",
        "players"
      RESTART IDENTITY CASCADE`,
+  );
+}
+
+/**
+ * Wipe auth-related tables (invites, refresh_tokens, users). Used by auth
+ * integration tests that need a clean slate per test case.
+ */
+export async function truncateAuthData(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(
+    `TRUNCATE "invites","refresh_tokens","users" RESTART IDENTITY CASCADE`,
   );
 }
