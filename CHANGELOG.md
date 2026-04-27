@@ -6,6 +6,25 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 
 ## [Unreleased]
 
+## Phase 0 — Web frontend foundation backend changes (2026-04-26)
+
+### Added
+- `Invite` model + migration. Single-use codes for gated registration.
+- `@fastify/cookie` plugin. Auth endpoints set/clear `auth_token` and `auth_refresh` httpOnly cookies in addition to returning tokens in the body.
+- `JwtAuthGuard` reads the access token from the `auth_token` cookie when no `Authorization: Bearer` header is present (header takes precedence).
+- `GET /api/v1/auth/me` — returns the authenticated user's profile.
+- `POST /api/v1/auth/register` — invite-gated registration. Auto-logs in.
+- `POST /api/v1/admin/invites` — admin-only. Creates a single-use invite.
+- `AUTH_PASSWORD_LOOKUP_FIELDS` env var (default `email,phone`) — narrows the columns `PasswordStrategy` searches when looking up the identifier.
+
+### Changed
+- `AuthController.login`, `refresh`, `logout` now also set/clear cookies. Response bodies unchanged.
+- `TokenService.refreshTtlSeconds()` is now public so the controller can size the refresh cookie's `Max-Age` correctly.
+
+### Backwards compatibility
+- All existing endpoints accept Bearer headers as before. Mobile/CLI clients are unaffected.
+- Default behavior of `PasswordStrategy` matches the prior unconditional email-or-phone lookup.
+
 ### Added — Tournament integration tests Tier 2 (2026-04-26)
 
 - Four edge-case integration tests layered on top of Tier 1, total integration suite now 12 tests:
