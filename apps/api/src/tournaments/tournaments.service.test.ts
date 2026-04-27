@@ -28,6 +28,7 @@ function mockPrisma(opts: {
       findUniqueOrThrow: vi.fn().mockResolvedValue(opts.tournament ?? {}),
       findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn().mockResolvedValue({}),
+      count: vi.fn().mockResolvedValue(0),
     },
     tournamentParticipant: {
       create: vi.fn().mockResolvedValue({}),
@@ -276,6 +277,51 @@ describe('TournamentsService', () => {
       });
       expect(mockRatingJob.trigger).toHaveBeenCalledWith({ tournamentId: 't1' });
       expect(result.message).toBeTruthy();
+    });
+  });
+
+  describe('findAll (with filters)', () => {
+    it('returns paginated list with meta', async () => {
+      prisma.tournament.findMany.mockResolvedValue([
+        { id: 't1', title: 'Open Cup', status: 'in_progress', format: 'groups_playoff', startsAt: new Date(), endsAt: null, participantsCount: 16, clubId: null },
+      ]);
+      prisma.tournament.count.mockResolvedValue(1);
+
+      const result = await service.findAll({ page: 1, limit: 20 });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.meta).toEqual({ total: 1, page: 1, limit: 20, totalPages: 1 });
+    });
+
+    it('filters out draft and open tournaments by default', async () => {
+      prisma.tournament.findMany.mockResolvedValue([]);
+      prisma.tournament.count.mockResolvedValue(0);
+
+      await service.findAll({ page: 1, limit: 20 });
+
+      const whereArg = prisma.tournament.findMany.mock.calls[0][0].where;
+      expect(whereArg.status?.in).not.toContain('draft');
+      expect(whereArg.status?.in).not.toContain('open');
+    });
+
+    it('applies status filter: live maps to in_progress', async () => {
+      prisma.tournament.findMany.mockResolvedValue([]);
+      prisma.tournament.count.mockResolvedValue(0);
+
+      await service.findAll({ page: 1, limit: 20, status: 'live' });
+
+      const whereArg = prisma.tournament.findMany.mock.calls[0][0].where;
+      expect(whereArg.status?.in).toContain('in_progress');
+    });
+
+    it('applies format filter', async () => {
+      prisma.tournament.findMany.mockResolvedValue([]);
+      prisma.tournament.count.mockResolvedValue(0);
+
+      await service.findAll({ page: 1, limit: 20, format: 'round_robin' });
+
+      const whereArg = prisma.tournament.findMany.mock.calls[0][0].where;
+      expect(whereArg.format).toBe('round_robin');
     });
   });
 

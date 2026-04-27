@@ -65,12 +65,52 @@ export class TournamentsService {
     return (MATCH_WEIGHTS[format] as Record<string, number>)[key] ?? 1.0;
   }
 
-  async findAll(organizerId?: string) {
-    return this.prisma.tournament.findMany({
-      where: organizerId ? { organizerId } : undefined,
-      orderBy: { startsAt: 'desc' },
-      include: { club: { select: { id: true, nameKa: true, nameEn: true } } },
-    });
+  async findAll(params: {
+    page: number;
+    limit: number;
+    status?: string;
+    format?: string;
+    organizerId?: string;
+  }) {
+    const { page, limit, status, format, organizerId } = params;
+    const skip = (page - 1) * limit;
+
+    let statusIn: string[];
+    if (status === 'live')          statusIn = ['in_progress'];
+    else if (status === 'upcoming') statusIn = ['prepared'];
+    else if (status === 'done')     statusIn = ['completed'];
+    else                            statusIn = ['prepared', 'in_progress', 'completed'];
+
+    const where = {
+      status: { in: statusIn },
+      ...(format ? { format } : {}),
+      ...(organizerId ? { organizerId } : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.tournament.findMany({
+        where,
+        orderBy: { startsAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          format: true,
+          startsAt: true,
+          endsAt: true,
+          participantsCount: true,
+          clubId: true,
+        },
+      }),
+      this.prisma.tournament.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findOne(id: string) {
@@ -78,7 +118,7 @@ export class TournamentsService {
       where: { id },
       include: {
         participants: {
-          include: { player: { select: { id: true, firstNameKa: true, lastNameKa: true } } },
+          include: { player: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true } } },
         },
         matches: { orderBy: { round: 'asc' } },
       },

@@ -86,9 +86,21 @@ export class TournamentsController {
   constructor(private tournaments: TournamentsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List tournaments' })
-  async findAll(@Query('organizerId') organizerId?: string) {
-    return this.tournaments.findAll(organizerId);
+  @ApiOperation({ summary: 'List tournaments (paginated, filterable)' })
+  async findAll(
+    @Query('status') status?: string,
+    @Query('format') format?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('organizerId') organizerId?: string,
+  ) {
+    return this.tournaments.findAll({
+      page: Math.max(1, parseInt(page ?? '1', 10) || 1),
+      limit: Math.min(100, Math.max(1, parseInt(limit ?? '20', 10) || 20)),
+      status,
+      format,
+      organizerId,
+    });
   }
 
   @Get(':id')
