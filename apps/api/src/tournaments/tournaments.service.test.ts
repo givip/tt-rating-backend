@@ -881,6 +881,15 @@ describe('getTournamentMatches', () => {
     const result = await svc.getTournamentMatches('t1', { page: 1, limit: 10, status: 'completed' });
     expect(result.data).toHaveLength(1);
     expect(result.meta.total).toBe(1);
+    expect(prisma.match.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tournamentId: 't1',
+          matchType: 'tournament',
+          status: 'completed',
+        }),
+      }),
+    );
   });
 
   it('throws NotFoundException for unknown tournament', async () => {
@@ -890,5 +899,13 @@ describe('getTournamentMatches', () => {
     const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
     await expect(svc.getTournamentMatches('bad-id', { page: 1, limit: 10 }))
       .rejects.toThrow('Tournament not found');
+  });
+
+  it('throws BadRequestException for invalid status', async () => {
+    const prisma = mockPrisma();
+    prisma.tournament.findUnique.mockResolvedValue({ id: 't1', status: 'in_progress' });
+    const svc = new TournamentsService(prisma as any, mockRatingTrigger() as any);
+    await expect(svc.getTournamentMatches('t1', { page: 1, limit: 10, status: 'bogus' }))
+      .rejects.toThrow('invalid status: bogus');
   });
 });

@@ -753,6 +753,12 @@ export class TournamentsService {
 
     const { page, limit, status } = params;
     const skip = (page - 1) * limit;
+
+    const VALID_MATCH_STATUSES = ['scheduled', 'in_progress', 'completed'] as const;
+    if (status && !VALID_MATCH_STATUSES.includes(status as (typeof VALID_MATCH_STATUSES)[number])) {
+      throw new BadRequestException(`invalid status: ${status}`);
+    }
+
     const where = {
       tournamentId,
       matchType: 'tournament' as const,
@@ -762,7 +768,7 @@ export class TournamentsService {
     const [data, total] = await Promise.all([
       this.prisma.match.findMany({
         where,
-        orderBy: { playedAt: 'desc' },
+        orderBy: [{ playedAt: { sort: 'desc', nulls: 'first' } }, { round: 'asc' }],
         skip,
         take: limit,
         include: {
