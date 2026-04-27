@@ -22,6 +22,7 @@ import {
   AuthStrategy,
 } from './strategies/auth-strategy.interface';
 import { TokenService } from './token.service';
+import { RegisterService } from './register.service';
 import {
   setAuthCookies,
   clearAuthCookies,
@@ -35,6 +36,12 @@ const LoginDto = z.object({
   credential: z.string().min(1),
 });
 const RefreshDto = z.object({ refreshToken: z.string().min(1) });
+const RegisterDto = z.object({
+  identifier: z.string().min(1),
+  credential: z.string().min(8),
+  name: z.string().min(1).max(120),
+  inviteCode: z.string().min(1),
+});
 
 /**
  * Parse with zod and translate `ZodError` to a NestJS `BadRequestException` so
@@ -58,6 +65,7 @@ export class AuthController {
     @Inject(AUTH_STRATEGY) private strategy: AuthStrategy,
     private tokens: TokenService,
     private prisma: PrismaService,
+    private registrar: RegisterService,
   ) {}
 
   /**
@@ -136,6 +144,27 @@ export class AuthController {
       domain: cookieDomainFromEnv(),
     });
     return tokens;
+  }
+
+  @Post('register')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Register a new user via single-use invite code' })
+  @ZodBody(RegisterDto)
+  async register(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const parsed = parseBody(RegisterDto, body);
+    const { tokens, user } = await this.registrar.register(parsed);
+    setAuthCookies(reply, {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      accessTtlSeconds: tokens.expiresIn,
+      refreshTtlSeconds: this.tokens.refreshTtlSeconds(),
+      secure: cookieSecureFromEnv(),
+      domain: cookieDomainFromEnv(),
+    });
+    return { ...tokens, user };
   }
 
   @Get('me')

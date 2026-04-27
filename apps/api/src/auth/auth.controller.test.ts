@@ -56,6 +56,10 @@ function makePrisma(findUniqueImpl?: ReturnType<typeof vi.fn>) {
   } as never;
 }
 
+function makeRegistrar() {
+  return { register: vi.fn() } as never;
+}
+
 function makeReply() {
   const reply: any = {
     setCookie: vi.fn(() => reply),
@@ -72,7 +76,7 @@ describe('AuthController', () => {
   beforeEach(() => {
     strategy = makeStrategy({ initiate: vi.fn().mockResolvedValue(undefined) });
     tokens = makeTokens();
-    controller = new AuthController(strategy, tokens, makePrisma());
+    controller = new AuthController(strategy, tokens, makePrisma(), makeRegistrar());
   });
 
   describe('POST /initiate', () => {
@@ -90,7 +94,7 @@ describe('AuthController', () => {
 
     it('returns {ok: true} even if strategy.initiate is undefined (password case)', async () => {
       const pwdStrategy = makeStrategy(); // no initiate
-      const c = new AuthController(pwdStrategy, tokens, makePrisma());
+      const c = new AuthController(pwdStrategy, tokens, makePrisma(), makeRegistrar());
       const res = await c.initiate({ identifier: 'alice@example.com' }, makeReq());
       expect(res).toEqual({ ok: true });
       // No initiate method on the strategy means nothing to call.
@@ -172,7 +176,7 @@ describe('AuthController', () => {
     it('calls reply.setCookie for access and refresh tokens', async () => {
       const strategy = makeStrategy();
       const tokens = makeTokens();
-      const ctrl = new AuthController(strategy, tokens, makePrisma());
+      const ctrl = new AuthController(strategy, tokens, makePrisma(), makeRegistrar());
 
       const cookies: Array<{ name: string; value: string }> = [];
       const reply = {
@@ -196,7 +200,7 @@ describe('AuthController', () => {
     it('returns the same body shape (browser ignores, mobile uses)', async () => {
       const strategy = makeStrategy();
       const tokens = makeTokens();
-      const ctrl = new AuthController(strategy, tokens, makePrisma());
+      const ctrl = new AuthController(strategy, tokens, makePrisma(), makeRegistrar());
       const reply = { setCookie: () => reply };
 
       const body = await ctrl.login(
@@ -267,7 +271,7 @@ describe('AuthController', () => {
           }),
         },
       } as never;
-      const ctrl = new AuthController(strategy, tokens, prisma);
+      const ctrl = new AuthController(strategy, tokens, prisma, makeRegistrar());
 
       const result = await ctrl.me({ user: { userId: 'u1', role: 'player' } } as never);
 
@@ -290,11 +294,43 @@ describe('AuthController', () => {
       const prisma = {
         user: { findUnique: vi.fn().mockResolvedValue(null) },
       } as never;
-      const ctrl = new AuthController(strategy, tokens, prisma);
+      const ctrl = new AuthController(strategy, tokens, prisma, makeRegistrar());
 
       await expect(
         ctrl.me({ user: { userId: 'gone', role: 'player' } } as never),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('POST /auth/register', () => {
+    it('calls RegisterService and sets cookies', async () => {
+      const strategy = makeStrategy();
+      const tokens = makeTokens();
+      const prisma = makePrisma();
+      const register = {
+        register: vi.fn().mockResolvedValue({
+          tokens: { accessToken: 'a', refreshToken: 'r', expiresIn: 900 },
+          user: { id: 'u', role: 'player' },
+        }),
+      } as never;
+      const ctrl = new AuthController(strategy, tokens, prisma, register);
+
+      const cookies: string[] = [];
+      const reply: any = { setCookie: (n: string) => { cookies.push(n); return reply; } };
+
+      const out = await ctrl.register(
+        { identifier: 'a@b.c', credential: 'pw12345678', name: 'A', inviteCode: 'X' },
+        reply as never,
+      );
+
+      expect((register as any).register).toHaveBeenCalledWith({
+        identifier: 'a@b.c',
+        credential: 'pw12345678',
+        name: 'A',
+        inviteCode: 'X',
+      });
+      expect(cookies.sort()).toEqual(['auth_refresh', 'auth_token']);
+      expect(out).toMatchObject({ accessToken: 'a' });
     });
   });
 

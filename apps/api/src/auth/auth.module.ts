@@ -14,6 +14,7 @@ import {
 } from './strategies/auth-strategy.interface';
 import { PasswordStrategy } from './strategies/password.strategy';
 import { PhoneOtpStrategy } from './strategies/phone-otp.strategy';
+import { RegisterService } from './register.service';
 import {
   TOKEN_CONFIG_SERVICE,
   TokenConfigService,
@@ -55,6 +56,7 @@ const envConfig: TokenConfigService = {
     RolesGuard,
     PasswordStrategy,
     PhoneOtpStrategy,
+    RegisterService,
     { provide: TOKEN_CONFIG_SERVICE, useValue: envConfig },
     { provide: SMS_PROVIDER, useClass: ConsoleSmsProvider },
     // Active strategy — selected by AUTH_STRATEGY env var. Default 'password'.
