@@ -69,7 +69,7 @@ export class TokenService {
     return parseTtlSeconds(this.config.get<string>('AUTH_ACCESS_TTL') ?? '15m');
   }
 
-  private refreshTtlSeconds(): number {
+  refreshTtlSeconds(): number {
     return parseTtlSeconds(this.config.get<string>('AUTH_REFRESH_TTL') ?? '30d');
   }
 

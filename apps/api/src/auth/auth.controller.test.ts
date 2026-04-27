@@ -40,11 +40,20 @@ function makeTokens(): TokenService {
     }),
     verifyAccess: vi.fn().mockReturnValue({ userId: 'u1', role: 'player' }),
     revokeAll: vi.fn().mockResolvedValue(undefined),
+    refreshTtlSeconds: vi.fn().mockReturnValue(2_592_000),
   } as unknown as TokenService;
 }
 
 function makeReq(ip = '10.0.0.1'): FastifyRequest {
   return { ip } as unknown as FastifyRequest;
+}
+
+function makeReply() {
+  const reply: any = {
+    setCookie: vi.fn(() => reply),
+    clearCookie: vi.fn(() => reply),
+  };
+  return reply;
 }
 
 describe('AuthController', () => {
@@ -98,6 +107,7 @@ describe('AuthController', () => {
       const res = await controller.login(
         { identifier: 'alice@example.com', credential: 'hunter2' },
         makeReq('198.51.100.4'),
+        makeReply(),
       );
       expect(strategy.complete).toHaveBeenCalledWith({
         identifier: 'alice@example.com',
@@ -120,6 +130,7 @@ describe('AuthController', () => {
         controller.login(
           { identifier: 'a', credential: 'b' },
           makeReq(),
+          makeReply(),
         ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(tokens.issue).not.toHaveBeenCalled();
@@ -133,6 +144,7 @@ describe('AuthController', () => {
         controller.login(
           { identifier: 'a', credential: 'b' },
           makeReq(),
+          makeReply(),
         ),
       ).rejects.toBeInstanceOf(TooManyRequestsException);
     });
@@ -142,14 +154,64 @@ describe('AuthController', () => {
         controller.login(
           { identifier: '', credential: '' },
           makeReq(),
+          makeReply(),
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
+  describe('login (cookies)', () => {
+    it('calls reply.setCookie for access and refresh tokens', async () => {
+      const strategy = makeStrategy();
+      const tokens = makeTokens();
+      const ctrl = new AuthController(strategy, tokens);
+
+      const cookies: Array<{ name: string; value: string }> = [];
+      const reply = {
+        setCookie: (name: string, value: string) => {
+          cookies.push({ name, value });
+          return reply;
+        },
+      };
+
+      await ctrl.login(
+        { identifier: 'u@x', credential: 'pw' },
+        makeReq(),
+        reply as never,
+      );
+
+      expect(cookies.map((c) => c.name).sort()).toEqual(['auth_refresh', 'auth_token']);
+      expect(cookies.find((c) => c.name === 'auth_token')!.value).toBe('a.tok');
+      expect(cookies.find((c) => c.name === 'auth_refresh')!.value).toBe('r.tok');
+    });
+
+    it('returns the same body shape (browser ignores, mobile uses)', async () => {
+      const strategy = makeStrategy();
+      const tokens = makeTokens();
+      const ctrl = new AuthController(strategy, tokens);
+      const reply = { setCookie: () => reply };
+
+      const body = await ctrl.login(
+        { identifier: 'u@x', credential: 'pw' },
+        makeReq(),
+        reply as never,
+      );
+
+      expect(body).toMatchObject({
+        accessToken: 'a.tok',
+        refreshToken: 'r.tok',
+        expiresIn: 900,
+      });
+    });
+  });
+
   describe('POST /refresh', () => {
     it('returns new token pair from tokens.rotate', async () => {
-      const res = await controller.refresh({ refreshToken: 'old.refresh' });
+      const res = await controller.refresh(
+        { refreshToken: 'old.refresh' },
+        { cookies: {} } as never,
+        makeReply(),
+      );
       expect(tokens.rotate).toHaveBeenCalledWith('old.refresh');
       expect(res).toEqual({
         accessToken: 'a2.tok',
@@ -163,13 +225,21 @@ describe('AuthController', () => {
         new UnauthorizedException('Invalid refresh token'),
       );
       await expect(
-        controller.refresh({ refreshToken: 'bad' }),
+        controller.refresh(
+          { refreshToken: 'bad' },
+          { cookies: {} } as never,
+          makeReply(),
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
-    it('returns 400 on invalid body', async () => {
+    it('returns 400 on invalid body and no cookie', async () => {
       await expect(
-        controller.refresh({ refreshToken: '' }),
+        controller.refresh(
+          { refreshToken: '' },
+          { cookies: {} } as never,
+          makeReply(),
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
@@ -180,7 +250,7 @@ describe('AuthController', () => {
     // revokes — anything auth-guard related is covered one layer up.
     it('calls tokens.revokeAll with req.user.userId', async () => {
       const req = { user: { userId: 'u1', role: 'player' } } as any;
-      const res = await controller.logout(req);
+      const res = await controller.logout(req, makeReply());
 
       expect(tokens.revokeAll).toHaveBeenCalledWith('u1');
       expect(res).toEqual({ ok: true });

@@ -6,10 +6,11 @@ import {
   Inject,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { ZodBody } from '../common/zod-swagger';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -18,6 +19,12 @@ import {
   AuthStrategy,
 } from './strategies/auth-strategy.interface';
 import { TokenService } from './token.service';
+import {
+  setAuthCookies,
+  clearAuthCookies,
+  cookieSecureFromEnv,
+  cookieDomainFromEnv,
+} from './cookie.util';
 
 const InitiateDto = z.object({ identifier: z.string().min(1) });
 const LoginDto = z.object({
@@ -77,6 +84,7 @@ export class AuthController {
   async login(
     @Body() body: unknown,
     @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const { identifier, credential } = parseBody(LoginDto, body);
     const { userId, role } = await this.strategy.complete({
@@ -84,16 +92,46 @@ export class AuthController {
       credential,
       meta: { ip: req.ip },
     });
-    return this.tokens.issue(userId, role);
+    const tokens = await this.tokens.issue(userId, role);
+    setAuthCookies(reply, {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      accessTtlSeconds: tokens.expiresIn,
+      refreshTtlSeconds: this.tokens.refreshTtlSeconds(),
+      secure: cookieSecureFromEnv(),
+      domain: cookieDomainFromEnv(),
+    });
+    return tokens;
   }
 
   @Post('refresh')
   @HttpCode(200)
   @ApiOperation({ summary: 'Rotate refresh token, mint new access token' })
   @ZodBody(RefreshDto)
-  async refresh(@Body() body: unknown) {
-    const { refreshToken } = parseBody(RefreshDto, body);
-    return this.tokens.rotate(refreshToken);
+  async refresh(
+    @Body() body: unknown,
+    @Req() req: FastifyRequest & { cookies?: Record<string, string> },
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const parsed = RefreshDto.safeParse(body);
+    // Refresh accepts the token from EITHER the body OR the auth_refresh cookie.
+    // Browsers will use the cookie path; mobile clients send it in the body.
+    const refreshToken = parsed.success
+      ? parsed.data.refreshToken
+      : req.cookies?.auth_refresh;
+    if (!refreshToken) {
+      throw new BadRequestException('Missing refresh token');
+    }
+    const tokens = await this.tokens.rotate(refreshToken);
+    setAuthCookies(reply, {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      accessTtlSeconds: tokens.expiresIn,
+      refreshTtlSeconds: this.tokens.refreshTtlSeconds(),
+      secure: cookieSecureFromEnv(),
+      domain: cookieDomainFromEnv(),
+    });
+    return tokens;
   }
 
   @Post('logout')
@@ -102,8 +140,13 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke all refresh tokens for the caller' })
   async logout(
     @Req() req: FastifyRequest & { user: { userId: string; role: string } },
+    @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<{ ok: true }> {
     await this.tokens.revokeAll(req.user.userId);
+    clearAuthCookies(reply, {
+      secure: cookieSecureFromEnv(),
+      domain: cookieDomainFromEnv(),
+    });
     return { ok: true };
   }
 }
