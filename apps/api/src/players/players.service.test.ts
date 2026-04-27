@@ -9,6 +9,14 @@ const mockPrisma = {
     create: vi.fn(),
     count: vi.fn(),
   },
+  tournamentParticipant: {
+    findMany: vi.fn(),
+    count: vi.fn(),
+  },
+  match: {
+    findMany: vi.fn(),
+    count: vi.fn(),
+  },
 };
 
 describe('PlayersService', () => {
@@ -113,6 +121,43 @@ describe('PlayersService', () => {
           data: expect.objectContaining({ internalRating: 1500, rd: 350 }),
         }),
       );
+    });
+  });
+
+  describe('playerTournaments', () => {
+    it('returns paginated tournament history for a player', async () => {
+      mockPrisma.tournamentParticipant.findMany.mockResolvedValue([
+        {
+          tournamentId: 't1', finalPosition: 1, ratingDeltaDisplay: 24,
+          tournament: { id: 't1', title: 'Open Cup', format: 'groups_playoff', startsAt: new Date('2026-04-10'), status: 'completed', participantsCount: 16 },
+        },
+      ]);
+      mockPrisma.tournamentParticipant.count.mockResolvedValue(1);
+
+      const result = await service.playerTournaments('p1', { page: 1, limit: 20 });
+      expect(result.data[0]).toMatchObject({ tournamentId: 't1', finalPosition: 1 });
+      expect(result.meta.total).toBe(1);
+    });
+  });
+
+  describe('playerMatches', () => {
+    it('returns paginated match history with outcome computed', async () => {
+      mockPrisma.match.findMany.mockResolvedValue([
+        {
+          id: 'm1', matchType: 'tournament', playedAt: new Date('2026-04-10'),
+          player1Id: 'p1', player2Id: 'p2',
+          winnerId: 'p1', setsPlayer1: 3, setsPlayer2: 0, status: 'completed',
+          tournamentId: 't1',
+          player1: { id: 'p1', firstNameKa: 'ა', lastNameKa: 'ბ', firstNameEn: 'A', lastNameEn: 'B', internalRating: 1520 },
+          player2: { id: 'p2', firstNameKa: 'გ', lastNameKa: 'დ', firstNameEn: 'C', lastNameEn: 'D', internalRating: 1480 },
+          tournament: { id: 't1', title: 'Open Cup' },
+        },
+      ]);
+      mockPrisma.match.count.mockResolvedValue(1);
+
+      const result = await service.playerMatches('p1', { page: 1, limit: 30 });
+      expect(result.data[0].outcome).toBe('W');
+      expect(result.data[0].opponentId).toBe('p2');
     });
   });
 });

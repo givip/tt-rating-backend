@@ -88,4 +88,74 @@ export class PlayersService {
       },
     });
   }
+
+  async playerTournaments(playerId: string, params: { page: number; limit: number }) {
+    const { page, limit } = params;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.tournamentParticipant.findMany({
+        where: { playerId },
+        orderBy: { tournament: { startsAt: 'desc' } },
+        skip,
+        take: limit,
+        include: {
+          tournament: {
+            select: { id: true, title: true, format: true, startsAt: true, status: true, participantsCount: true },
+          },
+        },
+      }),
+      this.prisma.tournamentParticipant.count({ where: { playerId } }),
+    ]);
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async playerMatches(playerId: string, params: { page: number; limit: number; since?: string }) {
+    const { page, limit, since } = params;
+    const skip = (page - 1) * limit;
+    const sinceDate = since ? new Date(since) : undefined;
+
+    const where = {
+      OR: [{ player1Id: playerId }, { player2Id: playerId }],
+      status: 'completed' as const,
+      matchType: { in: ['tournament', 'casual'] as const },
+      ...(sinceDate ? { playedAt: { gte: sinceDate } } : {}),
+    };
+
+    const [matches, total] = await Promise.all([
+      this.prisma.match.findMany({
+        where,
+        orderBy: { playedAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          player1: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true, internalRating: true } },
+          player2: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true, internalRating: true } },
+          tournament: { select: { id: true, title: true } },
+        },
+      }),
+      this.prisma.match.count({ where }),
+    ]);
+
+    const data = matches.map((m) => {
+      const isP1 = m.player1Id === playerId;
+      const opponent = isP1 ? m.player2 : m.player1;
+      const myScore = isP1 ? m.setsPlayer1 : m.setsPlayer2;
+      const theirScore = isP1 ? m.setsPlayer2 : m.setsPlayer1;
+      return {
+        matchId: m.id,
+        matchType: m.matchType,
+        playedAt: m.playedAt,
+        opponentId: opponent?.id ?? null,
+        opponent: opponent ?? null,
+        score: myScore != null && theirScore != null ? `${myScore}:${theirScore}` : null,
+        outcome: m.winnerId === playerId ? 'W' : 'L',
+        tournamentId: m.tournamentId ?? null,
+        tournamentTitle: m.tournament?.title ?? null,
+      };
+    });
+
+    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
 }
