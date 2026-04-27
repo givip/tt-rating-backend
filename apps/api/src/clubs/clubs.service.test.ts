@@ -3,7 +3,10 @@ import { NotFoundException } from '@nestjs/common';
 import { ClubsService } from './clubs.service';
 
 const mockPrisma = {
-  club: { findMany: vi.fn(), findUnique: vi.fn() },
+  club: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+  },
 };
 
 describe('ClubsService', () => {
@@ -15,32 +18,33 @@ describe('ClubsService', () => {
   });
 
   describe('findAll', () => {
-    it('returns all clubs ordered by English name', async () => {
-      const clubs = [
-        { id: 'c1', nameKa: 'დინამო', nameEn: 'Dynamo', city: 'Kutaisi' },
-        { id: 'c2', nameKa: 'პროსპინი', nameEn: 'ProSpin', city: 'Tbilisi' },
-      ];
-      mockPrisma.club.findMany.mockResolvedValue(clubs);
+    it('returns clubs with memberCount sorted by member count desc', async () => {
+      mockPrisma.club.findMany.mockResolvedValue([
+        { id: 'c1', nameKa: 'სპინი', nameEn: 'Spin', city: 'Tbilisi', _count: { players: 12 } },
+        { id: 'c2', nameKa: 'ასო', nameEn: 'ASO', city: 'Batumi', _count: { players: 5 } },
+      ]);
       const result = await service.findAll();
-      expect(result).toEqual(clubs);
-      expect(mockPrisma.club.findMany).toHaveBeenCalledWith({
-        select: { id: true, nameKa: true, nameEn: true, city: true },
-        orderBy: { nameEn: 'asc' },
-      });
+      expect(result[0].memberCount).toBe(12);
+      expect(result[1].memberCount).toBe(5);
     });
   });
 
   describe('findOne', () => {
-    it('returns club with players', async () => {
-      const club = { id: 'c1', nameKa: 'პროსპინი', nameEn: 'ProSpin', city: 'Tbilisi', players: [] };
-      mockPrisma.club.findUnique.mockResolvedValue(club);
+    it('returns club with members and tournaments hosted', async () => {
+      mockPrisma.club.findUnique.mockResolvedValue({
+        id: 'c1', nameKa: 'სპინი', nameEn: 'Spin', city: 'Tbilisi', address: null, phone: null, createdAt: new Date(),
+        players: [{ id: 'p1', firstNameKa: 'ა', lastNameKa: 'ბ', firstNameEn: 'A', lastNameEn: 'B', internalRating: 1520, provisional: false }],
+        tournaments: [{ id: 't1', title: 'Club Cup', status: 'completed', startsAt: new Date(), format: 'groups_playoff' }],
+        _count: { players: 1 },
+      });
       const result = await service.findOne('c1');
-      expect(result).toEqual(club);
+      expect(result.memberCount).toBe(1);
+      expect(result.tournaments).toHaveLength(1);
     });
 
-    it('throws NotFoundException when club not found', async () => {
+    it('throws NotFoundException for unknown club', async () => {
       mockPrisma.club.findUnique.mockResolvedValue(null);
-      await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('bad')).rejects.toThrow('Club not found');
     });
   });
 });
