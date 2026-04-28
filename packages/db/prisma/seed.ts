@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 // Keep in sync; seed cannot import from apps/api without a cycle.
 const SEED_BCRYPT_COST = 12;
 const DEV_ADMIN_PASSWORD = 'dev-admin-password';
+const DEV_ORGANIZER_PASSWORD = 'dev-organizer-password';
 
 async function main() {
   console.log('Seeding database...');
@@ -91,13 +92,16 @@ async function main() {
   }
 
   // --- Organizer user ---
+  // Dev-only credentials: organizer@prospin.ge / dev-organizer-password.
+  const organizerPasswordHash = await bcrypt.hash(DEV_ORGANIZER_PASSWORD, SEED_BCRYPT_COST);
   const organizer = await prisma.user.upsert({
     where: { id: 'user-organizer' },
-    update: {},
+    update: { passwordHash: organizerPasswordHash },
     create: {
       id: 'user-organizer',
       phone: '+995551000099',
       email: 'organizer@prospin.ge',
+      passwordHash: organizerPasswordHash,
       role: UserRole.organizer,
     },
   });
