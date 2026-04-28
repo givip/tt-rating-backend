@@ -14,7 +14,8 @@
     "generate": "prisma generate",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "seed:large": "ts-node -P tsconfig.seed.json prisma/seed-large.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"
