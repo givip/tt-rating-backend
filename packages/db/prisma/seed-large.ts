@@ -646,7 +646,6 @@ async function main(): Promise<void> {
             setsPlayer2: status === MatchStatus.completed ? winnerSets.loser : null,
             status,
             playedAt: status === MatchStatus.scheduled ? null : new Date(tb.startsAt.getTime() + i * 3600 * 1000),
-            tableNumber: null,
           } as any,
         });
         matchesCreated++;
