@@ -119,7 +119,7 @@ export class TournamentsService {
       where: { id },
       include: {
         participants: {
-          include: { player: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true } } },
+          include: { player: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true, internalRating: true } } },
         },
         matches: { orderBy: { round: 'asc' } },
       },
@@ -773,8 +773,8 @@ export class TournamentsService {
         skip,
         take: limit,
         include: {
-          player1: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true } },
-          player2: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true } },
+          player1: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true, internalRating: true } },
+          player2: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true, internalRating: true } },
         },
       }),
       this.prisma.match.count({ where }),
