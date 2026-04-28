@@ -27,6 +27,7 @@ import {
   MatchStatus,
   MatchType,
   RatingChangeType,
+  PlayingHand,
 } from '../generated';
 
 const prisma = new PrismaClient();
@@ -83,6 +84,18 @@ function clamp(v: number, lo: number, hi: number): number {
 function pad(n: number, width: number): string {
   return String(n).padStart(width, '0');
 }
+
+// -----------------------------------------------------------------------------
+// Equipment pool
+// -----------------------------------------------------------------------------
+
+const RACKETS = [
+  'Butterfly Viscaria',
+  'Stiga Carbonado',
+  'Donic Persson Powerplay',
+  'Yasaka Sweden Extra',
+  'Tibhar Stratus Power Wood',
+] as const;
 
 // -----------------------------------------------------------------------------
 // Name pool (Georgian + ASCII transliteration)
@@ -369,6 +382,14 @@ async function main(): Promise<void> {
         ? RatingConfidence.high
         : RatingConfidence.medium;
 
+    // ~70% have a known racket; the rest null.
+    const racket = rng() < 0.7 ? randChoice(RACKETS) : null;
+    // 85% right-handed, 15% left-handed.
+    const playingHand: PlayingHand = rng() < 0.85 ? PlayingHand.right : PlayingHand.left;
+    // Birth date between 1965-01-01 and 2010-01-01 (inclusive ish).
+    const birthYear = randInt(1965, 2009);
+    const birthDate = new Date(Date.UTC(birthYear, randInt(0, 11), randInt(1, 28)));
+
     await prisma.user.upsert({
       where: { id: userId },
       update: {},
@@ -398,7 +419,9 @@ async function main(): Promise<void> {
         tournamentsPlayed,
         ratingConfidence,
         isActive: true,
-        birthDate: new Date(Date.UTC(randInt(1970, 2010), randInt(0, 11), randInt(1, 28))),
+        birthDate,
+        racket,
+        playingHand,
       },
     });
 

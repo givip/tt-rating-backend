@@ -1,5 +1,5 @@
 import * as bcrypt from 'bcrypt';
-import { PrismaClient, Gender, RatingConfidence, UserRole, TournamentFormat, MatchFormat, TournamentCategory, TournamentStatus, MatchStatus, RatingChangeType } from '../generated';
+import { PrismaClient, Gender, RatingConfidence, UserRole, TournamentFormat, MatchFormat, TournamentCategory, TournamentStatus, MatchStatus, RatingChangeType, PlayingHand } from '../generated';
 
 const prisma = new PrismaClient();
 
@@ -31,10 +31,14 @@ async function main() {
   ]);
 
   // --- Users + Players ---
-  const playerData = [
-    { id: 'user-lasha', phone: '+995551000001', firstNameKa: 'ლაშა', lastNameKa: 'ბერიძე', firstNameEn: 'Lasha', lastNameEn: 'Beridze', gender: Gender.M, city: 'Tbilisi', clubId: prospin.id, rating: 2150, rd: 65, provisional: false, tournamentsPlayed: 24 },
-    { id: 'user-giorgi', phone: '+995551000002', firstNameKa: 'გიორგი', lastNameKa: 'კვარაცხელია', firstNameEn: 'Giorgi', lastNameEn: 'Kvaratskhelia', gender: Gender.M, city: 'Tbilisi', clubId: prospin.id, rating: 2080, rd: 72, provisional: false, tournamentsPlayed: 18 },
-    { id: 'user-nino', phone: '+995551000003', firstNameKa: 'ნინო', lastNameKa: 'სამადაშვილი', firstNameEn: 'Nino', lastNameEn: 'Samadashvili', gender: Gender.F, city: 'Tbilisi', clubId: ttbilisi.id, rating: 1920, rd: 80, provisional: false, tournamentsPlayed: 15 },
+  const playerData: Array<{
+    id: string; phone: string; firstNameKa: string; lastNameKa: string; firstNameEn: string; lastNameEn: string;
+    gender: Gender; city: string; clubId: string | null; rating: number; rd: number; provisional: boolean; tournamentsPlayed: number;
+    birthDate?: Date; racket?: string | null; playingHand?: PlayingHand;
+  }> = [
+    { id: 'user-lasha', phone: '+995551000001', firstNameKa: 'ლაშა', lastNameKa: 'ბერიძე', firstNameEn: 'Lasha', lastNameEn: 'Beridze', gender: Gender.M, city: 'Tbilisi', clubId: prospin.id, rating: 2150, rd: 65, provisional: false, tournamentsPlayed: 24, birthDate: new Date('1992-04-12'), racket: 'Butterfly Viscaria', playingHand: PlayingHand.right },
+    { id: 'user-giorgi', phone: '+995551000002', firstNameKa: 'გიორგი', lastNameKa: 'კვარაცხელია', firstNameEn: 'Giorgi', lastNameEn: 'Kvaratskhelia', gender: Gender.M, city: 'Tbilisi', clubId: prospin.id, rating: 2080, rd: 72, provisional: false, tournamentsPlayed: 18, birthDate: new Date('1995-09-03'), racket: 'Stiga Carbonado', playingHand: PlayingHand.left },
+    { id: 'user-nino', phone: '+995551000003', firstNameKa: 'ნინო', lastNameKa: 'სამადაშვილი', firstNameEn: 'Nino', lastNameEn: 'Samadashvili', gender: Gender.F, city: 'Tbilisi', clubId: ttbilisi.id, rating: 1920, rd: 80, provisional: false, tournamentsPlayed: 15, birthDate: new Date('1998-01-22'), racket: null, playingHand: PlayingHand.right },
     { id: 'user-davit', phone: '+995551000004', firstNameKa: 'დავით', lastNameKa: 'ჩიქოვანი', firstNameEn: 'Davit', lastNameEn: 'Chikovani', gender: Gender.M, city: 'Kutaisi', clubId: dynamo.id, rating: 1850, rd: 95, provisional: false, tournamentsPlayed: 11 },
     { id: 'user-mari', phone: '+995551000005', firstNameKa: 'მარი', lastNameKa: 'ჟღენტი', firstNameEn: 'Mari', lastNameEn: 'Zhghenti', gender: Gender.F, city: 'Tbilisi', clubId: prospin.id, rating: 1780, rd: 110, provisional: false, tournamentsPlayed: 8 },
     { id: 'user-sandro', phone: '+995551000006', firstNameKa: 'სანდრო', lastNameKa: 'გამყრელიძე', firstNameEn: 'Sandro', lastNameEn: 'Gamkrelidze', gender: Gender.M, city: 'Tbilisi', clubId: ttbilisi.id, rating: 1720, rd: 120, provisional: false, tournamentsPlayed: 6 },
@@ -77,6 +81,9 @@ async function main() {
         tournamentsPlayed: p.tournamentsPlayed,
         ratingConfidence: p.provisional ? RatingConfidence.low : RatingConfidence.high,
         isActive: true,
+        ...(p.birthDate && { birthDate: p.birthDate }),
+        ...(p.racket !== undefined && { racket: p.racket }),
+        ...(p.playingHand && { playingHand: p.playingHand }),
       },
     });
 
