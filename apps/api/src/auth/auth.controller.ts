@@ -175,7 +175,22 @@ export class AuthController {
   ) {
     const user = await this.prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, email: true, phone: true, role: true, createdAt: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        player: {
+          select: {
+            id: true,
+            firstNameKa: true,
+            lastNameKa: true,
+            firstNameEn: true,
+            lastNameEn: true,
+          },
+        },
+      },
     });
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
@@ -186,6 +201,7 @@ export class AuthController {
       phone: user.phone,
       role: user.role,
       createdAt: user.createdAt.toISOString(),
+      player: user.player ?? null,
     };
   }
 

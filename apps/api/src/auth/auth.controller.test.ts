@@ -268,6 +268,7 @@ describe('AuthController', () => {
             phone: null,
             role: 'player',
             createdAt: new Date('2026-01-01'),
+            player: null,
           }),
         },
       } as never;
@@ -281,10 +282,26 @@ describe('AuthController', () => {
         phone: null,
         role: 'player',
         createdAt: '2026-01-01T00:00:00.000Z',
+        player: null,
       });
       expect((prisma as any).user.findUnique).toHaveBeenCalledWith({
         where: { id: 'u1' },
-        select: { id: true, email: true, phone: true, role: true, createdAt: true },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          role: true,
+          createdAt: true,
+          player: {
+            select: {
+              id: true,
+              firstNameKa: true,
+              lastNameKa: true,
+              firstNameEn: true,
+              lastNameEn: true,
+            },
+          },
+        },
       });
     });
 
