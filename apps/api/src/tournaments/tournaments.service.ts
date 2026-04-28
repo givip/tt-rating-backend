@@ -122,6 +122,7 @@ export class TournamentsService {
           include: { player: { select: { id: true, firstNameKa: true, lastNameKa: true, firstNameEn: true, lastNameEn: true, internalRating: true } } },
         },
         matches: { orderBy: { round: 'asc' } },
+        club: { select: { id: true, nameKa: true, nameEn: true, city: true } },
       },
     });
     if (!tournament) throw new NotFoundException('Tournament not found');
