@@ -989,8 +989,7 @@ async function runSingleElim(
       const playedAt = new Date(tb.startsAt.getTime() + (round - 1) * 2 * 3600 * 1000 + i * 600 * 1000);
       const setsP1 = winner.id === p1.id ? score.winner : score.loser;
       const setsP2 = winner.id === p1.id ? score.loser : score.winner;
-      const bracketLabel = round === totalRounds ? 'F' : round === totalRounds - 1 ? 'SF' : round === totalRounds - 2 ? 'QF' : `R${round}`;
-      await persistMatch(tb, round, matchSeq++, p1, p2, winner, setsP1, setsP2, playedAt, bracketLabel);
+      await persistMatch(tb, round, matchSeq++, p1, p2, winner, setsP1, setsP2, playedAt, 'Main');
       onMatch();
       winners.push(winner);
       losers.push(loser);
