@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
+import { MatchStatus, MatchType, TournamentFormat, TournamentStatus } from '@tt-rating/db/generated';
 import {
   RATING_JOB_TRIGGER,
   type RatingJobTrigger,
@@ -75,15 +76,15 @@ export class TournamentsService {
     const { page, limit, status, format, organizerId } = params;
     const skip = (page - 1) * limit;
 
-    let statusIn: string[];
-    if (status === 'live')          statusIn = ['in_progress'];
-    else if (status === 'upcoming') statusIn = ['prepared'];
-    else if (status === 'done')     statusIn = ['completed'];
-    else                            statusIn = ['prepared', 'in_progress', 'completed'];
+    let statusIn: TournamentStatus[];
+    if (status === 'live')          statusIn = [TournamentStatus.in_progress];
+    else if (status === 'upcoming') statusIn = [TournamentStatus.prepared];
+    else if (status === 'done')     statusIn = [TournamentStatus.completed];
+    else                            statusIn = [TournamentStatus.prepared, TournamentStatus.in_progress, TournamentStatus.completed];
 
     const where = {
       status: { in: statusIn },
-      ...(format ? { format } : {}),
+      ...(format ? { format: format as TournamentFormat } : {}),
       ...(organizerId ? { organizerId } : {}),
     };
 
@@ -761,8 +762,8 @@ export class TournamentsService {
 
     const where = {
       tournamentId,
-      matchType: 'tournament' as const,
-      ...(status ? { status } : {}),
+      matchType: MatchType.tournament,
+      ...(status ? { status: status as MatchStatus } : {}),
     };
 
     const [data, total] = await Promise.all([

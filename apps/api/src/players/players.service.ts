@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
+import { MatchType, MatchStatus } from '@tt-rating/db/generated';
 import { CreatePlayerDto, PlayerListQuery } from '@tt-rating/types';
 
 const SELF_RATING_MAP = {
@@ -129,8 +130,8 @@ export class PlayersService {
 
     const where = {
       OR: [{ player1Id: playerId }, { player2Id: playerId }],
-      status: 'completed' as const,
-      matchType: { in: ['tournament', 'casual'] as const },
+      status: MatchStatus.completed,
+      matchType: { in: [MatchType.tournament, MatchType.casual] },
       ...(sinceDate ? { playedAt: { gte: sinceDate } } : {}),
     };
 
