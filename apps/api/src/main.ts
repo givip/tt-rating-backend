@@ -15,6 +15,12 @@ async function bootstrap() {
     secret: process.env.COOKIE_SECRET ?? undefined,
   });
 
+  const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
+  app.enableCors({
+    origin: corsOrigins && corsOrigins.length > 0 ? corsOrigins : true,
+    credentials: true,
+  });
+
   app.setGlobalPrefix('api/v1');
 
   const config = new DocumentBuilder()
