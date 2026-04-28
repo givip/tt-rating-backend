@@ -150,16 +150,19 @@ async function main() {
     },
   });
 
-  // Participants for t1
+  // Participants for t1. Champion + runner-up are exact (1, 2). SF losers
+  // share [3, 4] and QF losers share [5, 8] — that's how single-elim
+  // placements actually work (no inter-loser tiebreak), and it lets the
+  // demo data exercise the new finalPositionMax field.
   const t1Players = [
-    { playerId: users['user-lasha'].playerId, seed: 1, finalPosition: 1, ratingBefore: 2100, rdBefore: 70, ratingAfter: 2150, rdAfter: 65, ratingDeltaDisplay:50 },
-    { playerId: users['user-giorgi'].playerId, seed: 2, finalPosition: 2, ratingBefore: 2050, rdBefore: 80, ratingAfter: 2080, rdAfter: 72, ratingDeltaDisplay:30 },
-    { playerId: users['user-nino'].playerId, seed: 3, finalPosition: 3, ratingBefore: 1900, rdBefore: 90, ratingAfter: 1920, rdAfter: 80, ratingDeltaDisplay:20 },
-    { playerId: users['user-davit'].playerId, seed: 4, finalPosition: 4, ratingBefore: 1870, rdBefore: 100, ratingAfter: 1850, rdAfter: 95, ratingDeltaDisplay:-20 },
-    { playerId: users['user-mari'].playerId, seed: 5, finalPosition: 5, ratingBefore: 1800, rdBefore: 120, ratingAfter: 1780, rdAfter: 110, ratingDeltaDisplay:-20 },
-    { playerId: users['user-sandro'].playerId, seed: 6, finalPosition: 6, ratingBefore: 1740, rdBefore: 130, ratingAfter: 1720, rdAfter: 120, ratingDeltaDisplay:-20 },
-    { playerId: users['user-ana'].playerId, seed: 7, finalPosition: 7, ratingBefore: 1660, rdBefore: 145, ratingAfter: 1650, rdAfter: 135, ratingDeltaDisplay:-10 },
-    { playerId: users['user-nika'].playerId, seed: 8, finalPosition: 8, ratingBefore: 1600, rdBefore: 160, ratingAfter: 1580, rdAfter: 150, ratingDeltaDisplay:-20 },
+    { playerId: users['user-lasha'].playerId,   seed: 1, finalPosition: 1, finalPositionMax: 1, ratingBefore: 2100, rdBefore: 70,  ratingAfter: 2150, rdAfter: 65,  ratingDeltaDisplay:  50 },
+    { playerId: users['user-giorgi'].playerId,  seed: 2, finalPosition: 2, finalPositionMax: 2, ratingBefore: 2050, rdBefore: 80,  ratingAfter: 2080, rdAfter: 72,  ratingDeltaDisplay:  30 },
+    { playerId: users['user-nino'].playerId,    seed: 3, finalPosition: 3, finalPositionMax: 4, ratingBefore: 1900, rdBefore: 90,  ratingAfter: 1920, rdAfter: 80,  ratingDeltaDisplay:  20 },
+    { playerId: users['user-davit'].playerId,   seed: 4, finalPosition: 3, finalPositionMax: 4, ratingBefore: 1870, rdBefore: 100, ratingAfter: 1850, rdAfter: 95,  ratingDeltaDisplay: -20 },
+    { playerId: users['user-mari'].playerId,    seed: 5, finalPosition: 5, finalPositionMax: 8, ratingBefore: 1800, rdBefore: 120, ratingAfter: 1780, rdAfter: 110, ratingDeltaDisplay: -20 },
+    { playerId: users['user-sandro'].playerId,  seed: 6, finalPosition: 5, finalPositionMax: 8, ratingBefore: 1740, rdBefore: 130, ratingAfter: 1720, rdAfter: 120, ratingDeltaDisplay: -20 },
+    { playerId: users['user-ana'].playerId,     seed: 7, finalPosition: 5, finalPositionMax: 8, ratingBefore: 1660, rdBefore: 145, ratingAfter: 1650, rdAfter: 135, ratingDeltaDisplay: -10 },
+    { playerId: users['user-nika'].playerId,    seed: 8, finalPosition: 5, finalPositionMax: 8, ratingBefore: 1600, rdBefore: 160, ratingAfter: 1580, rdAfter: 150, ratingDeltaDisplay: -20 },
   ];
 
   for (const tp of t1Players) {

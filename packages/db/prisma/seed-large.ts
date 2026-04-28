@@ -629,8 +629,10 @@ async function main(): Promise<void> {
       preRatings.set(p.id, { rating: p.rating, rd: p.rd });
     }
 
-    // Determine final positions for completed tournaments
-    const finalPositions = new Map<string, number>();
+    // Determine final positions for completed tournaments. Each entry is a
+    // { min, max } range so tied final placements (e.g. all R16 losers sharing
+    // 9-16) can be expressed. Non-tied placements have min === max.
+    const finalPositions = new Map<string, { min: number; max: number }>();
 
     if (tb.status === TournamentStatus.completed) {
       // Generate matches per format
@@ -681,7 +683,7 @@ async function main(): Promise<void> {
     for (let seedIdx = 0; seedIdx < sortedParticipants.length; seedIdx++) {
       const p = sortedParticipants[seedIdx];
       const pre = preRatings.get(p.id)!;
-      const finalPosition = finalPositions.get(p.id);
+      const finalPositionRange = finalPositions.get(p.id);
 
       const ratingAfter = tb.status === TournamentStatus.completed ? p.rating : null;
       const rdAfter = tb.status === TournamentStatus.completed ? p.rd : null;
@@ -705,7 +707,8 @@ async function main(): Promise<void> {
           tournamentId: tb.id,
           playerId: p.id,
           seed: seedIdx + 1,
-          finalPosition: finalPosition ?? null,
+          finalPosition: finalPositionRange?.min ?? null,
+          finalPositionMax: finalPositionRange?.max ?? null,
           ratingBefore: pre.rating,
           rdBefore: pre.rd,
           ratingAfter,
@@ -957,7 +960,7 @@ function decideWinner(p1: PlayerState, p2: PlayerState): { winner: PlayerState; 
 async function runSingleElim(
   tb: TBlueprint,
   participants: PlayerState[],
-  finalPositions: Map<string, number>,
+  finalPositions: Map<string, { min: number; max: number }>,
   onMatch: () => void,
 ): Promise<void> {
   // Standard seeded bracket: seed 1 vs N, 2 vs N-1, etc.
@@ -999,30 +1002,35 @@ async function runSingleElim(
     round++;
   }
 
-  // currentRoundPlayers[0] is champion
+  // currentRoundPlayers[0] is champion. We assign each round of losers a
+  // shared position range — that's how real bracket placements work
+  // (R1 losers in a 16-player bracket all share "9-16", QF losers all share
+  // "5-8", SF losers all share "3-4", final loser is exactly "2").
   const champion = currentRoundPlayers[0];
-  finalPositions.set(champion.id, 1);
-  // Runner-up = loser of final round
+  finalPositions.set(champion.id, { min: 1, max: 1 });
   if (losersByRound.length > 0) {
     const runnerUp = losersByRound[losersByRound.length - 1][0];
-    finalPositions.set(runnerUp.id, 2);
+    finalPositions.set(runnerUp.id, { min: 2, max: 2 });
   }
-  // Semifinal losers => 3 / 4 (tied)
+  // Semifinal losers => tied at [3, 4]
   if (losersByRound.length >= 2) {
     const sfLosers = losersByRound[losersByRound.length - 2];
-    sfLosers.forEach((p) => finalPositions.set(p.id, 3));
+    sfLosers.forEach((p) => finalPositions.set(p.id, { min: 3, max: 4 }));
   }
-  // Earlier-round losers — tie at 2^(rounds-r-1)+1
+  // Earlier-round losers — round r (0-indexed from R1) losers tie at
+  // [2^(rounds-r-1) + 1, 2^(rounds-r)]. E.g. for a 16-bracket (rounds=4),
+  // R1 losers (r=0) → [9, 16]; QF losers (r=1) → [5, 8].
   for (let r = 0; r < losersByRound.length - 2; r++) {
-    const pos = Math.pow(2, totalRounds - r - 1) + 1;
-    losersByRound[r].forEach((p) => finalPositions.set(p.id, pos));
+    const min = Math.pow(2, totalRounds - r - 1) + 1;
+    const max = Math.pow(2, totalRounds - r);
+    losersByRound[r].forEach((p) => finalPositions.set(p.id, { min, max }));
   }
 }
 
 async function runRoundRobin(
   tb: TBlueprint,
   participants: PlayerState[],
-  finalPositions: Map<string, number>,
+  finalPositions: Map<string, { min: number; max: number }>,
   onMatch: () => void,
 ): Promise<void> {
   const N = participants.length;
@@ -1057,13 +1065,14 @@ async function runRoundRobin(
       if (w !== 0) return w;
       return (setDiff.get(b.id) ?? 0) - (setDiff.get(a.id) ?? 0);
     });
-  ranked.forEach((p, idx) => finalPositions.set(p.id, idx + 1));
+  // Round-robin standings produce exact positions — no ties.
+  ranked.forEach((p, idx) => finalPositions.set(p.id, { min: idx + 1, max: idx + 1 }));
 }
 
 async function runGroupsPlayoff(
   tb: TBlueprint,
   participants: PlayerState[],
-  finalPositions: Map<string, number>,
+  finalPositions: Map<string, { min: number; max: number }>,
   onMatch: () => void,
 ): Promise<void> {
   const groupCount = tb.groupCount ?? 4;
@@ -1126,6 +1135,7 @@ async function runGroupsPlayoff(
   let round = 2;
   const losersByRound: PlayerState[][] = [];
   let current = bracket;
+  const koTotalRounds = Math.log2(koPlayers.length);
   while (current.length > 1) {
     const winners: PlayerState[] = [];
     const losers: PlayerState[] = [];
@@ -1148,19 +1158,36 @@ async function runGroupsPlayoff(
     round++;
   }
 
+  // KO bracket placements: same single-elim ranges as runSingleElim — each
+  // round of losers ties at [2^(K-r-1)+1, 2^(K-r)] where K = koTotalRounds
+  // and r is the 0-indexed round within the KO bracket.
   const champion = current[0];
-  if (champion) finalPositions.set(champion.id, 1);
+  if (champion) finalPositions.set(champion.id, { min: 1, max: 1 });
   if (losersByRound.length > 0) {
     const runnerUp = losersByRound[losersByRound.length - 1][0];
-    if (runnerUp) finalPositions.set(runnerUp.id, 2);
+    if (runnerUp) finalPositions.set(runnerUp.id, { min: 2, max: 2 });
   }
   if (losersByRound.length >= 2) {
-    losersByRound[losersByRound.length - 2].forEach((p) => finalPositions.set(p.id, 3));
+    losersByRound[losersByRound.length - 2].forEach((p) =>
+      finalPositions.set(p.id, { min: 3, max: 4 }),
+    );
   }
-  // Group-stage non-advancers: position based on group rank (3rd+ in group => 9+)
+  for (let r = 0; r < losersByRound.length - 2; r++) {
+    const min = Math.pow(2, koTotalRounds - r - 1) + 1;
+    const max = Math.pow(2, koTotalRounds - r);
+    losersByRound[r].forEach((p) => finalPositions.set(p.id, { min, max }));
+  }
+  // Group-stage non-advancers all share a single tied range from
+  // (KO bracket size + 1) to (total participants). Real tournaments don't
+  // try to rank non-advancers across different groups by group standings —
+  // they're collectively "did not advance".
+  const groupStageMin = koPlayers.length + 1;
+  const groupStageMax = participants.length;
   groupStandings.forEach((s) => {
-    s.slice(2).forEach((p, idx) => {
-      if (!finalPositions.has(p.id)) finalPositions.set(p.id, koPlayers.length + 1 + idx);
+    s.slice(2).forEach((p) => {
+      if (!finalPositions.has(p.id)) {
+        finalPositions.set(p.id, { min: groupStageMin, max: groupStageMax });
+      }
     });
   });
 }

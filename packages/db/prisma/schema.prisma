@@ -248,6 +248,7 @@ model TournamentParticipant {
   playerId           String   @map("player_id")
   seed               Int?
   finalPosition      Int?     @map("final_position")
+  finalPositionMax   Int?     @map("final_position_max")
   ratingBefore       Float    @map("rating_before")
   rdBefore           Float    @map("rd_before")
   ratingAfter        Float?   @map("rating_after")
