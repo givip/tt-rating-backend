@@ -1084,11 +1084,16 @@ async function runGroupsPlayoff(
   }
 
   // Playoff: top 2 of each group => single elim
-  const koPlayers: PlayerState[] = [];
+  const koPlayersRaw: PlayerState[] = [];
   groupStandings.forEach((s) => {
-    if (s[0]) koPlayers.push(s[0]);
-    if (s[1]) koPlayers.push(s[1]);
+    if (s[0]) koPlayersRaw.push(s[0]);
+    if (s[1]) koPlayersRaw.push(s[1]);
   });
+
+  // Trim to nearest power of 2 so the bracket has clean rounds.
+  let safeCount = 1;
+  while (safeCount * 2 <= koPlayersRaw.length) safeCount *= 2;
+  const koPlayers = koPlayersRaw.slice(0, safeCount);
 
   // Bracket pairing (1A vs 2B, 1B vs 2A pattern simplified)
   let bracket: PlayerState[] = [];
